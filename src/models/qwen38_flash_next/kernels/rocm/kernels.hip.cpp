@@ -7600,6 +7600,17 @@ bool RoutedF16Gemm(const void* w, WeightType type, const __half* x,
       return LaunchRoutedF16<48>(w, type, x, tiles, n_tiles, pad_bounds,
                                  rows_in, rows_out, swiglu_gate, out, out_half,
                                  m, k, stream);
+    // The Laguna routed experts ask for a 64-row tile, and the Q8_0 path
+    // caps its tile width at that. Upstream kept only the widths its own
+    // models use, so these two come back.
+    case 64:
+      return LaunchRoutedF16<64>(w, type, x, tiles, n_tiles, pad_bounds,
+                                 rows_in, rows_out, swiglu_gate, out, out_half,
+                                 m, k, stream);
+    case 192:
+      return LaunchRoutedF16<192>(w, type, x, tiles, n_tiles, pad_bounds,
+                                  rows_in, rows_out, swiglu_gate, out, out_half,
+                                  m, k, stream);
     case 128: {
       if (out_half == nullptr || swiglu_gate != nullptr)
         return false;

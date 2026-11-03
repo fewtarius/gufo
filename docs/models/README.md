@@ -9,6 +9,7 @@ are downloaded separately and are not part of the runtime package.
 | --- | --- | --- |
 | DeepSeek V4 Flash | Flash 0731 mixed IQ2/Q2/Q8 GGUF; text | [Usage and modes](deepseek-v4-flash/README.md) |
 | EmbeddingGemma 2 | BF16 safetensors; text/image to embeddings | [Usage](embeddinggemma-2/README.md) |
+| Laguna S 2.1 | Sharded Q4_K_XL GGUF; text | [Usage](laguna/README.md) |
 | MiniMax H3 FL2VA | Pinned safetensors; text to audiovisual output | [Presets and usage](minimax-h3/README.md) |
 | Qwen-Image-2.1 | BF16 safetensors; generation and image editing | [Usage](qwen-image-2.1/README.md) |
 | Qwen3-ASR 1.7B | BF16 safetensors; audio to text | [Usage](qwen3-asr/README.md) |

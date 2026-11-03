@@ -33,6 +33,8 @@ Non-Nix builds must retain the notices of the versions they actually distribute.
 | GNU C/C++/OpenMP runtimes | System runtime libraries; no Gufo source import | `LGPL-2.1-or-later AND (GPL-3.0-or-later WITH GCC-exception-3.1)` | glibc/GCC packages in flake.lock | [GNU](https://www.gnu.org/software/) |
 | llama.cpp / ggml | Adapted quantization, attention and model-private HIP kernels | `MIT` | `5c0e9468378eba6bf3cc1989ff5d62fbbe4d9e3a`; attention `e9fa0781f1c25fc4fe8c86be1edc6970661ad6f0` | [llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | mikealanni/gufo | Adapted Flash-Next GDN row reuse and SSM stride optimization | `MIT` | `f450218743bcaf77e3e1f8fab78f4cd4e4aafae3` | [gufo fork](https://github.com/mikealanni/gufo/tree/f450218743bcaf77e3e1f8fab78f4cd4e4aafae3) |
+| mikealanni/gufo | Ported Laguna S 2.1 model support: the engine, the native tool-call dialect, block-sparse attention and the DFlash drafter integration | `MIT` | `91eea1aed30a08aa4deffbb2bacae807402a8b40` (merge of `laguna-worktree/feat/laguna-dflash` into `merge/laguna-full`) | [gufo fork](https://github.com/mikealanni/gufo/tree/91eea1aed30a08aa4deffbb2bacae807402a8b40) |
+| Gufetto fork | KV row codec numeric contract (q8_0/q4_0 rounding, F16 conversion, validation rules); the implementation in src/core/kv_codec/ is independent | `MIT` | Gufetto `src/models/qwen38_flash_next/kv_cache.hpp` | [Gufetto](https://github.com/fewtarius/gufetto) |
 | Qwen chat templates | Reference Jinja and adapted renderer behavior | `Apache-2.0` | `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0` (27B), `de4b8e4d43b917e7706784d8bb445c9af86a3540` (Flash-Next) | [Qwen](https://huggingface.co/Qwen/Qwen3.8-27B) |
 | DS4 | Adapted loader, tokenizer, sessions and HIP kernels | `MIT` | `84cc882352757baf628a1776badf7cc54d584e28` | [antirez/ds4](https://github.com/antirez/ds4) |
 | DS4 GB10/GX10 fork | Adapted paired MoE launch code, now HIP | `MIT` | `910501e` | [xangel82/DS4](https://github.com/xangel82/DS4-GB10-GX10-DSpark-CUDA) |
@@ -53,6 +55,13 @@ This software is based in part on the work of the Independent JPEG Group.
 
 The mikealanni/gufo fork retains the same Copyright (c) 2026 gufo contributors
 notice and MIT text as Gufo's root `LICENSE`.
+
+The Laguna S 2.1 model support ported from the mikealanni/gufo fork retains the
+same Copyright (c) 2026 gufo contributors notice and MIT text as Gufo's root
+`LICENSE`.
+
+The Gufetto KV codec contract retains the same Copyright (c) 2026 gufo
+contributors notice and MIT text as Gufo's root `LICENSE`.
 
 Gufo loads FFmpeg libraries on demand for video embeddings and invokes
 ffmpeg/ffprobe as separate processes for media tools. The pinned Nix build

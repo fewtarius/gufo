@@ -18,6 +18,13 @@ Adapted code includes:
 - hipCUB: Duane Merrill, NVIDIA CORPORATION and AMD (BSD-3-Clause).
 - Flash-Next GDN row reuse and SSM stride optimization: adapted from
   mikealanni/gufo f450218743bc, Copyright (c) 2026 gufo contributors (MIT).
+- Laguna S 2.1 model support: ported from mikealanni/gufo (the Laguna engine,
+  the native tool-call dialect, the block-sparse attention path and the
+  DFlash drafter integration), Copyright (c) 2026 Mike Alani and gufo
+  contributors (MIT).
+- KV row codec numeric contract (src/core/kv_codec/, docs/kv-codec.md):
+  derived from the Gufetto fork's Flash-Next q8 KV work. The implementation
+  is independent, Copyright (c) 2026 gufo contributors (MIT).
 
 Strix Halo optimization inspiration also came from these MIT-licensed projects:
 - LaurentZuijdwijk/llama.cpp: https://github.com/LaurentZuijdwijk/llama.cpp

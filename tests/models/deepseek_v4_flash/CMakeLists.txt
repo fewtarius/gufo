@@ -84,7 +84,10 @@ if(ENGINE_ENABLE_HIP)
   add_executable(ds4_serving_test serving_test.cpp)
   # gufo_serving still reaches the Qwen 27B model and vision stack through
   # inference_backend.cpp; step 10 removes that interim edge.
-  target_link_libraries(ds4_serving_test PRIVATE gufo_serving)
+  # The serving tier owns no model-specific loader: the model builds its own
+  # runner, so this test links the model extension for that factory.
+  target_link_libraries(ds4_serving_test PRIVATE gufo_serving
+    gufo_deepseek_v4_flash_hip)
   add_test(NAME ds4.serving COMMAND ds4_serving_test)
   set_tests_properties(ds4.serving PROPERTIES
     LABELS "gpu;hip;ds4;server;external-model;slow"

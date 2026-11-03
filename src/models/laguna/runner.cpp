@@ -832,8 +832,21 @@ namespace gufo::models::laguna {
 
 std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
     const ext::TextRunnerOptions& options, std::string* error) {
-  const std::uint32_t max_context =
-      options.max_context != 0 ? options.max_context : 65536;
+  // The context comes from the model unless the caller asked for one. The
+  // GGUF carries the native window under the architecture-prefixed key
+  // the other extensions read.
+  std::uint32_t max_context = options.max_context;
+  if (max_context == 0) {
+    const std::uint32_t native =
+        options.reader->GetMetadataUint32("laguna.context_length").value_or(0);
+    if (native < 2) {
+      if (error != nullptr) {
+        *error = "GGUF has no valid native context length; specify --context";
+      }
+      return nullptr;
+    }
+    max_context = native;
+  }
   std::string load_error;
   gpu::EngineOptions engine_options;
   engine_options.max_context = max_context;
@@ -856,6 +869,38 @@ std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
       *error = "Failed to load Laguna model: " + load_error;
     }
     return nullptr;
+  }
+  // Pick the largest context the device can hold. The weights and the
+  // drafter are resident now, so what is left is what the KV cache can
+  // use. An explicit --context is the user's decision to honour or to
+  // refuse, never to reduce silently.
+  if (options.max_context == 0) {
+    const std::size_t free_bytes = LagunaModel::FreeDeviceBytes();
+    if (free_bytes != 0) {
+      const std::uint32_t native = max_context;
+      std::uint32_t chosen = native;
+      // A session holds the window plus the verify rows, so size the cache
+      // for what the session will really ask for.
+      while (chosen > 4096 &&
+             model->SessionBytesForContext(chosen + LagunaSession::kMaxVerifyRows) *
+                     2 >
+                 free_bytes) {
+        chosen /= 2;
+      }
+      if (chosen != native) {
+        Logger::Info(
+            "loader",
+            "event=context_clamped native=" + std::to_string(native) +
+                " chosen=" + std::to_string(chosen) +
+                " reason=kv_cache_exceeds_free_device_memory free_mib=" +
+                std::to_string(free_bytes / (1024 * 1024)) + " kv_mib=" +
+                std::to_string(
+                    model->SessionBytesForContext(
+                        chosen + LagunaSession::kMaxVerifyRows) /
+                    (1024 * 1024)));
+        max_context = chosen;
+      }
+    }
   }
   auto tokenizer =
       tokenization::QwenTokenizer::CreateFromGguf(*options.reader, &load_error);

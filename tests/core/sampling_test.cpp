@@ -399,6 +399,66 @@ void TestRawLogprobs() {
   }
 }
 
+// The speculative acceptance rule the serve path uses for a sampled target:
+// accept the draft with probability P_target(draft), and on a miss resample
+// from the residual (the target distribution with the draft removed).
+//
+// It has to be unbiased: a draft sampled from the drafter's distribution q
+// must leave the published token distributed as the target's p. Working it
+// through, P(publish = z) = q(z)p(z) + sum over drafts x != z of
+// q(x)(1 - p(x)) * p(z)/(1 - p(x)) = q(z)p(z) + p(z)(1 - q(z)) = p(z).
+//
+// This test runs the rule end to end on a small vocabulary and checks the
+// published frequencies against p.
+void TestSpeculativeAcceptanceIsUnbiased() {
+  constexpr TokenId kTokens = 4;
+  // A peaked target: p = (0.6, 0.25, 0.1, 0.05).
+  std::vector<float> logits(kTokens);
+  const float target[4] = {0.6F, 0.25F, 0.1F, 0.05F};
+  for (TokenId i = 0; i < kTokens; ++i) {
+    logits[i] = std::log(target[i]);
+  }
+  // The drafter is close but not identical: q = (0.5, 0.3, 0.15, 0.05).
+  const float draft[4] = {0.5F, 0.3F, 0.15F, 0.05F};
+
+  SamplingConfig config;
+  config.temperature = 1.0F;
+  config.top_k = 0;
+  config.min_keep = 0;
+  config.seed = 12345;
+  SamplerState sampler(config);
+
+  std::vector<double> published(kTokens, 0.0);
+  constexpr int kTrials = 40000;
+  for (int trial = 0; trial < kTrials; ++trial) {
+    // The drafter proposes a token from its own distribution.
+    double pick = sampler.Uniform();
+    TokenId guess = 0;
+    while (guess + 1 < kTokens && pick >= draft[guess + 1]) {
+      ++guess;
+    }
+    const double p = sampler.Distribution(logits).probability(guess);
+    TokenId token = guess;
+    if (!(sampler.Uniform() < p)) {
+      const float one = 1.0F;
+      token = sampler.SampleResidual(logits, {&guess, 1}, {&one, 1});
+    }
+    Expect(token < kTokens, "the residual draw stays in the vocabulary");
+    published[token] += 1.0;
+  }
+  for (TokenId i = 0; i < kTokens; ++i) {
+    const double observed = published[i] / kTrials;
+    // A tolerance of 0.01 on 40000 trials: the binomial standard error is
+    // under 0.003, so a correct rule lands well inside it and a biased one
+    // (which would shift by up to 0.2 here) does not.
+    Expect(std::abs(observed - target[i]) < 0.01,
+           "the speculative acceptance rule is unbiased");
+    std::cout << "  token " << i << ": observed=" << observed
+              << " expected=" << target[i] << '\n';
+  }
+}
+
+
 int main() {
   TestRawLogprobs();
   TestReasoningBudgetForcesTheEnd();
@@ -408,6 +468,7 @@ int main() {
   TestReasoningBudgetWithGrammar();
   TestCompactTargetContract();
   TestTopPOverLargeVocabularyMatchesDefinition();
+  TestSpeculativeAcceptanceIsUnbiased();
   std::cout << "sampling_test passed\n";
   return 0;
 }

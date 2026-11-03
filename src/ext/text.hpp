@@ -100,6 +100,13 @@ struct TextRunnerCapabilities {
   bool in_pass_checkpoint{false};
   bool partial_prefill_retention{false};
   bool prefill_rollback{false};
+  /// Spacing of the intermediate checkpoints a cold long prompt retains.
+  ///
+  /// A checkpoint lands on a grid point so an edit before it loses less
+  /// work. A model whose prefill chunks are wider than the default should
+  /// match them, otherwise a checkpoint lands mid-chunk and forces a short
+  /// extra pass to reach it.
+  std::size_t prefill_grid_tokens{2048};
 };
 
 struct TextRunnerPersistenceDescriptor {

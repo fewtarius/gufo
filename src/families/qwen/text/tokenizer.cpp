@@ -2,7 +2,9 @@
 
 #include <unicode/bytestream.h>
 #include <unicode/normalizer2.h>
+#include <unicode/regex.h>
 #include <unicode/uchar.h>
+#include <unicode/unistr.h>
 
 #include <algorithm>
 #include <array>
@@ -11,6 +13,7 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <span>
@@ -27,6 +30,38 @@
 namespace gufo::tokenization {
 
 namespace {
+
+/// Compiled pre-tokenizer regex, cached by pattern text.
+///
+/// A compiled pattern is immutable and safe to match from several threads;
+/// only the cache lookup needs the lock.
+std::shared_ptr<const icu::RegexPattern> CachedRegexPattern(const char* pattern) {
+  static std::mutex cache_mutex;
+  static std::unordered_map<std::string, std::shared_ptr<const icu::RegexPattern>>
+      cache;
+  const std::string key(pattern);
+  {
+    const std::lock_guard<std::mutex> lock(cache_mutex);
+    const auto found = cache.find(key);
+    if (found != cache.end()) {
+      return found->second;
+    }
+  }
+  UErrorCode status = U_ZERO_ERROR;
+  UParseError parse_error;
+  std::shared_ptr<icu::RegexPattern> compiled(
+      icu::RegexPattern::compile(icu::UnicodeString::fromUTF8(pattern),
+                                 parse_error, status));
+  if (U_FAILURE(status) || compiled == nullptr) {
+    throw std::runtime_error("could not compile the pre-tokenizer regex");
+  }
+  const std::shared_ptr<const icu::RegexPattern> shared = compiled;
+  {
+    const std::lock_guard<std::mutex> lock(cache_mutex);
+    cache.emplace(key, shared);
+  }
+  return shared;
+}
 
 std::string FormatHexByteToken(std::uint8_t byte_val) {
   char buf[8];
@@ -391,6 +426,9 @@ std::unique_ptr<QwenTokenizer> QwenTokenizer::CreateFromGguf(
   if (reader.GetMetadataString("tokenizer.ggml.pre") ==
       std::optional<std::string_view>{"qwen35"}) {
     tokenizer->pre_tokenizer_ = PreTokenizer::kQwen35;
+  } else if (reader.GetMetadataString("tokenizer.ggml.pre") ==
+             std::optional<std::string_view>{"laguna"}) {
+    tokenizer->pre_tokenizer_ = PreTokenizer::kLaguna;
   }
 
   if (auto eos = reader.GetMetadataUint32("tokenizer.ggml.eos_token_id")) {
@@ -638,7 +676,100 @@ std::vector<TokenId> QwenTokenizer::BpeMergeChunk(
   return merged;
 }
 
+std::vector<TokenId> QwenTokenizer::RegexEncodeText(std::string_view text,
+                                                    const char* pattern,
+                                                    bool ignore_merges) const {
+  const auto compiled = CachedRegexPattern(pattern);
+  const icu::UnicodeString input = icu::UnicodeString::fromUTF8(
+      icu::StringPiece(text.data(), static_cast<int32_t>(text.size())));
+  UErrorCode status = U_ZERO_ERROR;
+  const std::unique_ptr<icu::RegexMatcher> matcher(
+      compiled->matcher(input, status));
+  if (U_FAILURE(status) || matcher == nullptr) {
+    throw std::runtime_error("could not create the pre-tokenizer matcher");
+  }
+
+  std::vector<TokenId> tokens;
+  std::vector<TokenId> piece_tokens;
+  std::string piece;
+  std::string escaped;
+  const auto add_piece = [&](std::string_view span_text) {
+    if (span_text.empty()) {
+      return;
+    }
+    // Vocabulary keys hold GPT-2 byte-level escapes (space is U+0120, a tab
+    // is U+0109), so the whole-piece lookup has to use the same domain.
+    escaped.clear();
+    for (const unsigned char byte : span_text) {
+      escaped += ByteToGpt2Utf8(byte);
+    }
+    // `ignore_merges`: a split piece that is itself a vocabulary token is
+    // encoded as that single token without running merge ranks over it.
+    if (const auto whole =
+            ignore_merges ? token_to_id_.find(escaped) : token_to_id_.end();
+        whole != token_to_id_.end()) {
+      tokens.push_back(whole->second);
+      return;
+    }
+    piece_tokens = BpeMergeChunk(span_text);
+    tokens.insert(tokens.end(), piece_tokens.begin(), piece_tokens.end());
+  };
+
+  std::int32_t previous_end = 0;
+  while (matcher->find(status)) {
+    if (U_FAILURE(status)) {
+      throw std::runtime_error("pre-tokenizer split failed");
+    }
+    const std::int32_t start = matcher->start(status);
+    const std::int32_t end = matcher->end(status);
+    if (U_FAILURE(status) || end <= start) {
+      continue;
+    }
+    if (start > previous_end) {
+      piece.clear();
+      input.tempSubStringBetween(previous_end, start).toUTF8String(piece);
+      add_piece(piece);
+    }
+    piece.clear();
+    input.tempSubStringBetween(start, end).toUTF8String(piece);
+    add_piece(piece);
+    previous_end = end;
+  }
+  if (previous_end < input.length()) {
+    piece.clear();
+    input.tempSubStringBetween(previous_end, input.length())
+        .toUTF8String(piece);
+    add_piece(piece);
+  }
+  return tokens;
+}
+
+std::vector<TokenId> QwenTokenizer::LagunaEncodeText(
+    std::string_view text) const {
+  // llama.cpp `LLAMA_VOCAB_PRE_TYPE_LAGUNA`: split on newline runs, then the
+  // main pattern inside each piece.
+  static constexpr char kPattern[] =
+      R"((?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)";
+  std::vector<TokenId> tokens;
+  std::size_t offset = 0;
+  while (offset < text.size()) {
+    const bool newline = text[offset] == '\n';
+    std::size_t end = offset;
+    while (end < text.size() && (text[end] == '\n') == newline) {
+      ++end;
+    }
+    const auto part =
+        RegexEncodeText(text.substr(offset, end - offset), kPattern, false);
+    tokens.insert(tokens.end(), part.begin(), part.end());
+    offset = end;
+  }
+  return tokens;
+}
+
 std::vector<TokenId> QwenTokenizer::BpeEncodeText(std::string_view text) const {
+  if (pre_tokenizer_ == PreTokenizer::kLaguna) {
+    return LagunaEncodeText(text);
+  }
   if (pre_tokenizer_ != PreTokenizer::kQwen35) {
     return BpeMergeChunk(text);
   }

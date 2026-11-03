@@ -97,6 +97,7 @@ private:
   enum class PreTokenizer : std::uint8_t {
     kNone,
     kQwen35,
+    kLaguna,
   };
 
   struct PairHash {
@@ -119,6 +120,13 @@ private:
   void InitializeByteTokens(bool eager_decoded_tokens = true);
   std::vector<TokenId> BpeMergeChunk(std::string_view chunk) const;
   std::vector<TokenId> BpeEncodeText(std::string_view text) const;
+  /// Splits `text` with `pattern` and encodes each piece.
+  std::vector<TokenId> RegexEncodeText(std::string_view text,
+                                        const char* pattern,
+                                        bool ignore_merges) const;
+  /// The Laguna pre-tokenizer: split on newline runs, then the main
+  /// pattern inside each piece.
+  std::vector<TokenId> LagunaEncodeText(std::string_view text) const;
 
   std::vector<std::string> id_to_token_;
   std::vector<std::string> id_to_decoded_token_;

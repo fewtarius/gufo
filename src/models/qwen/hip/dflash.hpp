@@ -175,6 +175,33 @@ public:
 
   /// Ingests target multi-layer hidden states and injects K/V into the draft
   /// cache.
+  /// Ingests target features that are already on the device.
+  ///
+  /// The host-side InjectTargetContext copies the features across the bus
+  /// first. A model that captures the target's hidden states with its own
+  /// kernel already has them on the device, and copying them back to the
+  /// host and forward again costs a round trip per prefill chunk.
+  ///
+  /// Positions may leave a gap after the recorded frontier, because the
+  /// target can advance without a capture (a rewound session, a restored
+  /// one). Rows in the gap are zeroed so a later lookback reads padding
+  /// instead of a stale key.
+  bool InjectTargetContextDevice(const float* target_features,
+                                 std::uint32_t position,
+                                 std::uint32_t num_tokens,
+                                 const DFlashTrace& trace = {});
+
+  /// Drops the injected context rows at or after `position`.
+  ///
+  /// Used when the target rewinds its KV cache: the drafter's frontier has
+  /// to follow, or the next injection lands behind the recorded frontier and
+  /// is rejected.
+  void RewindInjectedContext(std::uint32_t position) noexcept {
+    if (position < injected_context_len_) {
+      injected_context_len_ = position;
+    }
+  }
+
   bool InjectTargetContext(std::span<const float> target_features,
                            std::uint32_t position, std::uint32_t num_tokens,
                            const DFlashTrace& trace = {});
@@ -211,6 +238,18 @@ public:
   void RestorePersistentSnapshot(std::span<const std::uint8_t> payload);
   [[nodiscard]] std::size_t StateBytes() const noexcept;
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const noexcept;
+
+  /// Host bytes a persistent snapshot of the injected context needs.
+  ///
+  /// A session snapshot that embeds the drafter's state needs the injected
+  /// context and its frontier in a flat buffer it can copy into its own
+  /// payload.
+  [[nodiscard]] std::size_t PersistentPayloadBytes() const noexcept;
+  /// Writes the injected context and its frontier into `destination`.
+  bool SavePersistentSnapshot(std::span<std::uint8_t> destination,
+                              std::string* error_msg) const;
+  /// Sum of the injected keys, for verifying a snapshot round trip.
+  [[nodiscard]] double InjectedContextChecksum() const noexcept;
   [[nodiscard]] QwenGpuMemoryUsage GetMemoryUsage() const noexcept;
   [[nodiscard]] static QwenGpuMemoryUsage EstimateMemoryUsage(
       const QwenDFlashGpuModel& model, std::uint32_t max_context,
@@ -245,6 +284,17 @@ private:
                                 std::uint32_t position,
                                 std::uint32_t num_tokens,
                                 const DFlashTrace& trace);
+  /// The row work both injection paths share, once the features are staged
+  /// in d_target_features_.
+  bool InjectTargetContextRows(std::uint32_t position, std::uint32_t num_tokens,
+                               const DFlashTrace& trace);
+  /// Stages features that are already on the device.
+  bool InjectTargetContextDeviceChunk(const float* target_features,
+                                      std::uint32_t position,
+                                      std::uint32_t num_tokens,
+                                      const DFlashTrace& trace);
+  /// Zeroes the slots the drafter cannot fill after a gap in the frontier.
+  bool ZeroTargetContextGap(std::uint32_t position, std::uint32_t num_tokens);
   void Allocate();
   void Free() noexcept;
   [[nodiscard]] static std::size_t BatchScratchBytes(

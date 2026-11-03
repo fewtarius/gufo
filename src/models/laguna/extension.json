@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "name": "laguna",
+  "version": "0.1.0",
+  "api_version": ">= 0.1.0",
+  "entry": "laguna_register",
+  "registration_target": "gufo_laguna",
+  "depends": [],
+  "platforms": [
+    "linux"
+  ],
+  "providers": [
+    {
+      "id": "laguna",
+      "capability": "text_generation",
+      "keys": [
+        "gguf:laguna"
+      ],
+      "model_ids": [
+        "laguna"
+      ],
+      "speculative": [
+        "dflash"
+      ],
+      "target": "gufo_laguna_hip",
+      "entry": "laguna_provider_register",
+      "serving": {
+        "draft_options": {
+          "dflash": "--dflash-model"
+        }
+      }
+    }
+  ],
+  "options": [
+    {
+      "name": "--dflash-model",
+      "type": "path",
+      "commands": [
+        "serve",
+        "bench",
+        "prompt"
+      ],
+      "providers": [
+        "laguna"
+      ],
+      "help": "DFlash draft model path for speculative decoding"
+    }
+  ],
+  "targets": {
+    "gufo_laguna": {
+      "requires": []
+    },
+    "gufo_laguna_hip": {
+      "requires": [
+        "hip"
+      ]
+    }
+  },
+  "production_paths": {
+    "include": [
+      "**/*.cpp",
+      "**/*.h",
+      "**/*.hpp",
+      "**/*.hip",
+      "extension.*"
+    ],
+    "exclude": [
+      "tests/",
+      "functional/",
+      "tools/",
+      "fixtures/"
+    ]
+  },
+  "docs": {
+    "title": "Laguna S 2.1",
+    "inputs": "Sharded Q4_K_XL GGUF; text",
+    "guide": "docs/models/laguna/README.md"
+  },
+  "tests": [
+    {
+      "target": "laguna_chat_template_test",
+      "ctest": "laguna\\.chat_template",
+      "check_pr": true
+    },
+    {
+      "target": "laguna_tool_calls_test",
+      "ctest": "laguna\\.tool_calls",
+      "check_pr": true
+    }
+  ],
+  "test_labels": [
+    "laguna"
+  ],
+  "fixtures": "tests/models/laguna/fixtures/",
+  "functional": "functional/"
+}

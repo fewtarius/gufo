@@ -1,0 +1,333 @@
+[
+ {
+  "name": "user_only",
+  "messages": [
+   {
+    "role": "user",
+    "content": "Hello there."
+   }
+  ],
+  "tools": null,
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are a helpful, conversationally-fluent assistant made by Poolside. You are here to be helpful to users through natural language conversations.</system>\n<user>Hello there.</user>\n<assistant></think>"
+ },
+ {
+  "name": "system_user",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are helpful."
+   },
+   {
+    "role": "user",
+    "content": "Hello there."
+   }
+  ],
+  "tools": null,
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are helpful.</system>\n<user>Hello there.</user>\n<assistant></think>"
+ },
+ {
+  "name": "system_tools_user",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are helpful."
+   },
+   {
+    "role": "user",
+    "content": "Load the skill."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_operations",
+     "description": "Load or unload a skill by name.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "operation": {
+        "type": "string",
+        "enum": [
+         "load",
+         "unload"
+        ]
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "operation",
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are helpful.\n\n### Tools\n\nYou may call functions to assist with the user query.\nAll available function signatures are listed below:\n<available_tools>\n{\"type\": \"function\", \"function\": {\"name\": \"skill_operations\", \"description\": \"Load or unload a skill by name.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"operation\": {\"type\": \"string\", \"enum\": [\"load\", \"unload\"]}, \"name\": {\"type\": \"string\"}}, \"required\": [\"operation\", \"name\"]}}}\n</available_tools></system>\n<user>Load the skill.</user>\n<assistant></think>"
+ },
+ {
+  "name": "tools_no_system",
+  "messages": [
+   {
+    "role": "user",
+    "content": "Load the skill."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_operations",
+     "description": "Load or unload a skill by name.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "operation": {
+        "type": "string",
+        "enum": [
+         "load",
+         "unload"
+        ]
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "operation",
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "Read a file.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  ],
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are a helpful, conversationally-fluent assistant made by Poolside. You are here to be helpful to users through natural language conversations.\n\n### Tools\n\nYou may call functions to assist with the user query.\nAll available function signatures are listed below:\n<available_tools>\n{\"type\": \"function\", \"function\": {\"name\": \"skill_operations\", \"description\": \"Load or unload a skill by name.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"operation\": {\"type\": \"string\", \"enum\": [\"load\", \"unload\"]}, \"name\": {\"type\": \"string\"}}, \"required\": [\"operation\", \"name\"]}}}\n{\"type\": \"function\", \"function\": {\"name\": \"read_file\", \"description\": \"Read a file.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}}}}}\n</available_tools></system>\n<user>Load the skill.</user>\n<assistant></think>"
+ },
+ {
+  "name": "thinking",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are helpful."
+   },
+   {
+    "role": "user",
+    "content": "Load the skill."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_operations",
+     "description": "Load or unload a skill by name.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "operation": {
+        "type": "string",
+        "enum": [
+         "load",
+         "unload"
+        ]
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "operation",
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "thinking": true,
+  "expected": "〈|EOS|〉<system>You are helpful.\n\n### Tools\n\nYou may call functions to assist with the user query.\nAll available function signatures are listed below:\n<available_tools>\n{\"type\": \"function\", \"function\": {\"name\": \"skill_operations\", \"description\": \"Load or unload a skill by name.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"operation\": {\"type\": \"string\", \"enum\": [\"load\", \"unload\"]}, \"name\": {\"type\": \"string\"}}, \"required\": [\"operation\", \"name\"]}}}\n</available_tools></system>\n<user>Load the skill.</user>\n<assistant><think>"
+ },
+ {
+  "name": "history",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are helpful."
+   },
+   {
+    "role": "user",
+    "content": "Load the skill."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1",
+      "type": "function",
+      "function": {
+       "name": "skill_operations",
+       "arguments": {
+        "operation": "load",
+        "name": "audit-codebase"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "content": "loaded audit-codebase"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_operations",
+     "description": "Load or unload a skill by name.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "operation": {
+        "type": "string",
+        "enum": [
+         "load",
+         "unload"
+        ]
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "operation",
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are helpful.\n\n### Tools\n\nYou may call functions to assist with the user query.\nAll available function signatures are listed below:\n<available_tools>\n{\"type\": \"function\", \"function\": {\"name\": \"skill_operations\", \"description\": \"Load or unload a skill by name.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"operation\": {\"type\": \"string\", \"enum\": [\"load\", \"unload\"]}, \"name\": {\"type\": \"string\"}}, \"required\": [\"operation\", \"name\"]}}}\n</available_tools></system>\n<user>Load the skill.</user>\n<assistant></think><tool_call>skill_operations<arg_key>operation</arg_key><arg_value>load</arg_value><arg_key>name</arg_key><arg_value>audit-codebase</arg_value></tool_call></assistant>\n<tool_response>loaded audit-codebase</tool_response>\n<assistant></think>"
+ },
+ {
+  "name": "typed_arguments",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are helpful."
+   },
+   {
+    "role": "user",
+    "content": "Compute."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1",
+      "type": "function",
+      "function": {
+       "name": "compute",
+       "arguments": {
+        "count": 3,
+        "ratio": 0.5,
+        "flag": true,
+        "items": [
+         1,
+         2,
+         3
+        ],
+        "nested": {
+         "a": "b"
+        },
+        "text": "plain"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "tools": null,
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are helpful.</system>\n<user>Compute.</user>\n<assistant></think><tool_call>compute<arg_key>count</arg_key><arg_value>3</arg_value><arg_key>ratio</arg_key><arg_value>0.5</arg_value><arg_key>flag</arg_key><arg_value>true</arg_value><arg_key>items</arg_key><arg_value>[1, 2, 3]</arg_value><arg_key>nested</arg_key><arg_value>{\"a\": \"b\"}</arg_value><arg_key>text</arg_key><arg_value>plain</arg_value></tool_call></assistant>\n<assistant></think>"
+ },
+ {
+  "name": "assistant_content_and_calls",
+  "messages": [
+   {
+    "role": "user",
+    "content": "Load the skill."
+   },
+   {
+    "role": "assistant",
+    "content": "Sure, one moment.",
+    "tool_calls": [
+     {
+      "id": "call_1",
+      "type": "function",
+      "function": {
+       "name": "skill_operations",
+       "arguments": {
+        "operation": "load",
+        "name": "audit-codebase"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_operations",
+     "description": "Load or unload a skill by name.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "operation": {
+        "type": "string",
+        "enum": [
+         "load",
+         "unload"
+        ]
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "operation",
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "thinking": false,
+  "expected": "〈|EOS|〉<system>You are a helpful, conversationally-fluent assistant made by Poolside. You are here to be helpful to users through natural language conversations.\n\n### Tools\n\nYou may call functions to assist with the user query.\nAll available function signatures are listed below:\n<available_tools>\n{\"type\": \"function\", \"function\": {\"name\": \"skill_operations\", \"description\": \"Load or unload a skill by name.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"operation\": {\"type\": \"string\", \"enum\": [\"load\", \"unload\"]}, \"name\": {\"type\": \"string\"}}, \"required\": [\"operation\", \"name\"]}}}\n</available_tools></system>\n<user>Load the skill.</user>\n<assistant></think>Sure, one moment.<tool_call>skill_operations<arg_key>operation</arg_key><arg_value>load</arg_value><arg_key>name</arg_key><arg_value>audit-codebase</arg_value></tool_call></assistant>\n<assistant></think>"
+ }
+]

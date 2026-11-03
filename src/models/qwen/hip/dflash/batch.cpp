@@ -45,7 +45,9 @@ struct BlockWorkspace {
     const auto kv_size =
         static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
     const auto dynamic_size =
-        2U * draft.conv_kernel_size * (hidden_size / draft.conv_group_size);
+        draft.is_v1
+            ? 0
+            : 2U * draft.conv_kernel_size * (hidden_size / draft.conv_group_size);
     hidden = take(rows * hidden_size);
     normed = take(rows * hidden_size);
     conv = take(rows * hidden_size);
@@ -147,6 +149,7 @@ void QwenDFlashGpuExecutor::InjectTargetContextBatch(
   auto& coordinator = *requests.front().executor;
   const auto& config = coordinator.model_->GetConfig();
   const auto& weights = coordinator.model_->GetWeights();
+  const auto& draft = coordinator.model_->GetDFlashConfig();
   const auto feature_width = coordinator.GetTargetFeaturesSize();
   std::array<std::size_t, 9> offsets{};
   std::array<std::uint32_t, 8> counts{};
@@ -197,6 +200,16 @@ void QwenDFlashGpuExecutor::InjectTargetContextBatch(
         coordinator.d_target_features_ + offsets[index] * feature_width,
         requests[index].features.data(), requests[index].features.size_bytes(),
         hipMemcpyHostToDevice, stream));
+  }
+  // Per-tap pre-norm applied to each captured target hidden state before
+  // the feature-fusion projection. Optional: a v1 draft exports it.
+  if (weights.aux_norm.data != nullptr) {
+    kernels::LaunchDFlashTapRMSNorm(
+        coordinator.d_target_features_,
+        static_cast<const float*>(weights.aux_norm.data),
+        coordinator.d_target_features_, rows,
+        static_cast<std::uint32_t>(draft.target_layer_ids.size()),
+        static_cast<std::uint32_t>(hidden_size), 1e-6F, stream);
   }
   coordinator.RunInjectGemm(
       weights.fc_projection, coordinator.d_target_features_,
@@ -311,8 +324,10 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
     offsets[index + 1] = offsets[index] + counts[index] + 1U;
   }
   std::vector<speculative::DraftProposal> proposals(requests.size());
-  // Keep the single-user path and uncommon topology handling unchanged.
-  if (requests.size() == 1 || config.head_dim > 256 ||
+  // Keep the single-user path and uncommon topology handling unchanged. A v1
+  // draft has no selector and no dynamic convolutions, and the batched path
+  // only implements the v2 graph, so it takes the single-request path.
+  if (requests.size() == 1 || config.head_dim > 256 || draft.is_v1 ||
       std::ranges::find(std::span(counts).first(requests.size()), 0U) !=
           std::span(counts).first(requests.size()).end()) {
     for (std::size_t index = 0; index < requests.size(); ++index) {
@@ -339,7 +354,9 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
   const auto kv_size =
       static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
   const auto dynamic_size =
-      2U * draft.conv_kernel_size * (hidden_size / draft.conv_group_size);
+      draft.is_v1
+          ? 0
+          : 2U * draft.conv_kernel_size * (hidden_size / draft.conv_group_size);
   const auto capacity = std::bit_ceil(rows);
   const auto stream = coordinator.stream_;
   for (const auto& request : requests)

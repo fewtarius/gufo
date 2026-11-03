@@ -230,16 +230,27 @@ void PackDFlashWeights(speculative::QwenDFlashWeights& weights,
   weights.output_norm =
       CopyVectorF32(weights.output_norm, hidden, allocations, packed_bytes);
 
+  // Per-tap pre-norm for the captured target hidden states. Optional: a v1
+  // draft exports it, a v2 draft does not. It has to reach device memory -
+  // a GPU kernel cannot read the GGUF-mmap'd host pointer.
+  if (!weights.aux_norm.empty()) {
+    const auto elements = weights.aux_norm.num_elements;
+    weights.aux_norm =
+        CopyVectorF32(weights.aux_norm, elements, allocations, packed_bytes);
+  }
+
   // Candidate selector.
-  weights.selector_predecessor =
-      PackMatrixBf16(weights.selector_predecessor, cfg.vocab_size,
-                     df_cfg.selector_rank, allocations, packed_bytes);
-  weights.selector_successor =
-      PackMatrixBf16(weights.selector_successor, cfg.vocab_size,
-                     df_cfg.selector_rank, allocations, packed_bytes);
-  weights.selector_hidden =
-      PackBlockMatrix(weights.selector_hidden, df_cfg.selector_rank, hidden,
-                      allocations, packed_bytes);
+  if (!df_cfg.is_v1) {
+    weights.selector_predecessor =
+        PackMatrixBf16(weights.selector_predecessor, cfg.vocab_size,
+                       df_cfg.selector_rank, allocations, packed_bytes);
+    weights.selector_successor =
+        PackMatrixBf16(weights.selector_successor, cfg.vocab_size,
+                       df_cfg.selector_rank, allocations, packed_bytes);
+    weights.selector_hidden =
+        PackBlockMatrix(weights.selector_hidden, df_cfg.selector_rank, hidden,
+                        allocations, packed_bytes);
+  }
 
   // Draft Transformer Layers
   for (std::size_t i = 0; i < weights.layers.size(); ++i) {
@@ -271,20 +282,34 @@ void PackDFlashWeights(speculative::QwenDFlashWeights& weights,
     transformer.ffn_down = PackBlockMatrix(
         transformer.ffn_down, hidden, intermediate, allocations, packed_bytes);
 
-    const std::size_t groups = hidden / df_cfg.conv_group_size;
+    if (df_cfg.is_v1) {
+      // A v1 draft gates each attention head's output. The gate weight has
+      // to reach device memory: a GPU kernel cannot read the GGUF-mmap'd
+      // host pointer (it faults), which is why every other per-layer weight
+      // is packed here too.
+      transformer.attn_gate =
+          PackMatrixBf16(transformer.attn_gate, cfg.num_attention_heads,
+                         hidden, allocations, packed_bytes);
+    }
+
+    const std::size_t groups = df_cfg.is_v1
+                                   ? 0
+                                   : hidden / df_cfg.conv_group_size;
     const std::size_t dynamic_size = 2U * df_cfg.conv_kernel_size * groups;
-    layer.attention_conv_base = CopyVectorF32(
-        layer.attention_conv_base, hidden * df_cfg.conv_kernel_size * 2U,
-        allocations, packed_bytes);
-    layer.ffn_conv_base = CopyVectorF32(layer.ffn_conv_base,
-                                        hidden * df_cfg.conv_kernel_size * 2U,
-                                        allocations, packed_bytes);
-    layer.attention_conv_projection =
-        PackBlockMatrix(layer.attention_conv_projection, dynamic_size, hidden,
-                        allocations, packed_bytes);
-    layer.ffn_conv_projection =
-        PackBlockMatrix(layer.ffn_conv_projection, dynamic_size, hidden,
-                        allocations, packed_bytes);
+    if (!df_cfg.is_v1) {
+      layer.attention_conv_base = CopyVectorF32(
+          layer.attention_conv_base, hidden * df_cfg.conv_kernel_size * 2U,
+          allocations, packed_bytes);
+      layer.ffn_conv_base = CopyVectorF32(layer.ffn_conv_base,
+                                          hidden * df_cfg.conv_kernel_size * 2U,
+                                          allocations, packed_bytes);
+      layer.attention_conv_projection =
+          PackBlockMatrix(layer.attention_conv_projection, dynamic_size, hidden,
+                          allocations, packed_bytes);
+      layer.ffn_conv_projection =
+          PackBlockMatrix(layer.ffn_conv_projection, dynamic_size, hidden,
+                          allocations, packed_bytes);
+    }
   }
 }
 

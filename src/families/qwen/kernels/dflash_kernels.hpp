@@ -21,6 +21,34 @@ void LaunchDFlashGroupedDynamicConv(
 void LaunchDFlashSiLUMul(float* gate, const float* up,
                          std::uint32_t total_elements, hipStream_t stream);
 
+/// out[row][head][d] *= softplus(gate[row][head]) for every d in
+/// [0, head_dim) - the per-head attention output gate a v1 draft applies.
+/// `attn_out` is [num_rows][num_heads * head_dim], `gate` is
+/// [num_rows][num_heads].
+void LaunchDFlashAttnGateMul(float* attn_out, const float* gate,
+                             std::uint32_t num_rows, std::uint32_t num_heads,
+                             std::uint32_t head_dim, hipStream_t stream);
+
+/// gate[row][m] = sum_k bf16_weight[m][k] * x[row][k]. A plain, unoptimized
+/// reduction kernel - the shared batched BF16 GEMM dispatch is not validated
+/// for this projection's small, head-count-shaped M. The projection is tiny
+/// (num_rows <= block_size, M = num_heads), so a naive kernel costs nothing
+/// measurable.
+void LaunchDFlashAttnGateProjection(const void* bf16_weight, const float* x,
+                                    float* out, std::uint32_t num_rows,
+                                    std::uint32_t m, std::uint32_t k,
+                                    hipStream_t stream);
+
+/// RMSNorm each of `num_taps` consecutive `hidden_size`-wide segments of a
+/// [num_rows][num_taps][hidden_size] buffer independently, with its own
+/// gamma column (`weight[tap * hidden_size + i]`, matching the GGUF
+/// `enc.aux_norm.weight` [hidden_size, num_taps] layout) - distinct from
+/// LaunchBatchedPerHeadRMSNorm, which shares one gamma vector across heads.
+void LaunchDFlashTapRMSNorm(const float* x, const float* weight, float* out,
+                            std::uint32_t num_rows, std::uint32_t num_taps,
+                            std::uint32_t hidden_size, float eps,
+                            hipStream_t stream);
+
 void LaunchDFlashNonCausalAttention(
     const float* q, const float* injected_k, const float* injected_v,
     const float* block_k, const float* block_v, float* out,

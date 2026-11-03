@@ -38,6 +38,10 @@ struct QwenDFlashConfig {
 
   /// Number of transformer blocks in the draft model.
   std::uint32_t num_layers{0};
+
+  /// True when this is a standard DFlash v1 model (no dynamic convs or
+  /// selector).
+  bool is_v1{false};
 };
 
 /// DFlash-2 transformer weights plus the layer-local dynamic convolutions.
@@ -62,6 +66,12 @@ struct QwenDFlashWeights {
   models::QwenTensorRef
       fc_projection;  // [n_target_layers * hidden_size, draft_hidden_size]
   models::QwenTensorRef fc_norm;  // [draft_hidden_size] RMSNorm
+
+  // Per-tap RMSNorm applied to each captured target hidden state before
+  // concatenation and the feature-fusion projection - [hidden_size,
+  // n_target_layers], one gamma column per tap. Optional: absent on exports
+  // that skip it.
+  models::QwenTensorRef aux_norm;
 
   // Shared / tied target embeddings and LM head
   models::QwenTensorRef token_embedding;

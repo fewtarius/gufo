@@ -212,46 +212,61 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   const auto block_size =
       RequiredUint32(reader, prefix + "block_size", error_msg);
   const auto conv_kernel_size =
-      RequiredUint32(reader, prefix + "conv_kernel_size", error_msg);
+      reader.GetMetadataUint32(prefix + "conv_kernel_size");
   const auto conv_group_size =
-      RequiredUint32(reader, prefix + "conv_group_size", error_msg);
-  const auto selector_rank =
-      RequiredUint32(reader, prefix + "selector_rank", error_msg);
+      reader.GetMetadataUint32(prefix + "conv_group_size");
+  const auto selector_rank = reader.GetMetadataUint32(prefix + "selector_rank");
   const auto selector_top_k =
-      RequiredUint32(reader, prefix + "selector_top_k", error_msg);
+      reader.GetMetadataUint32(prefix + "selector_top_k");
   const auto sliding_window =
       RequiredUint32(reader, prefix + "attention.sliding_window", error_msg);
-  const auto mask_token_id =
-      RequiredUint32(reader, "tokenizer.ggml.mask_token_id", error_msg);
+  auto mask_token_id = reader.GetMetadataUint32("tokenizer.ggml.mask_token_id");
+  if (!mask_token_id.has_value()) {
+    mask_token_id = reader.GetMetadataUint32(prefix + "mask_token_id");
+  }
   const auto is_causal = reader.GetMetadataBool(prefix + "attention.causal");
-  if (!block_size || !conv_kernel_size || !conv_group_size || !selector_rank ||
-      !selector_top_k || !sliding_window || !mask_token_id ||
+  if (!block_size || !sliding_window || !mask_token_id ||
       !is_causal.has_value()) {
     if (!is_causal.has_value()) {
       SetError(error_msg,
-               "DFlash-2 GGUF is missing required metadata "
+               "DFlash GGUF is missing required metadata "
                "'dflash.attention.causal'");
     }
     return std::nullopt;
   }
 
+  // A DFlash v1 draft carries neither the layer-local dynamic convolutions
+  // nor the low-rank candidate selector that DFlash-2 adds, so it exports
+  // none of their metadata keys. A DFlash-2 draft always exports all four,
+  // so their absence identifies a v1 draft unambiguously.
+  const bool is_v1 =
+      !conv_kernel_size.has_value() && !selector_rank.has_value();
+  df_cfg.is_v1 = is_v1;
   df_cfg.block_size = *block_size;
-  df_cfg.conv_kernel_size = *conv_kernel_size;
-  df_cfg.conv_group_size = *conv_group_size;
-  df_cfg.selector_rank = *selector_rank;
-  df_cfg.selector_top_k = *selector_top_k;
+  df_cfg.conv_kernel_size = conv_kernel_size.value_or(0);
+  df_cfg.conv_group_size = conv_group_size.value_or(0);
+  df_cfg.selector_rank = selector_rank.value_or(0);
+  df_cfg.selector_top_k = selector_top_k.value_or(0);
   df_cfg.sliding_window = *sliding_window;
   df_cfg.mask_token_id = *mask_token_id;
   df_cfg.num_layers = config.num_layers;
 
-  if (df_cfg.block_size < 2 || df_cfg.conv_kernel_size == 0 ||
-      df_cfg.conv_group_size == 0 ||
-      config.hidden_size % df_cfg.conv_group_size != 0 ||
-      df_cfg.selector_rank == 0 || df_cfg.selector_top_k == 0 ||
-      df_cfg.selector_top_k > 16U ||
-      df_cfg.sliding_window < df_cfg.block_size || *is_causal) {
-    SetError(error_msg, "DFlash-2 GGUF has an invalid diffusion topology");
-    return std::nullopt;
+  if (is_v1) {
+    if (df_cfg.block_size < 2 || df_cfg.sliding_window < df_cfg.block_size ||
+        *is_causal) {
+      SetError(error_msg, "DFlash-1 GGUF has an invalid diffusion topology");
+      return std::nullopt;
+    }
+  } else {
+    if (df_cfg.block_size < 2 || df_cfg.conv_kernel_size == 0 ||
+        df_cfg.conv_group_size == 0 ||
+        config.hidden_size % df_cfg.conv_group_size != 0 ||
+        df_cfg.selector_rank == 0 || df_cfg.selector_top_k == 0 ||
+        df_cfg.selector_top_k > 16U ||
+        df_cfg.sliding_window < df_cfg.block_size || *is_causal) {
+      SetError(error_msg, "DFlash-2 GGUF has an invalid diffusion topology");
+      return std::nullopt;
+    }
   }
 
   // GGUF target_layers are layer-input indices (the convention used by the
@@ -292,7 +307,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   const std::size_t attention = config.AttentionSize();
   const std::size_t kv =
       static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
-  const std::size_t groups = hidden / df_cfg.conv_group_size;
+  const std::size_t groups = is_v1 ? 0 : hidden / df_cfg.conv_group_size;
   const std::size_t dynamic_coefficients =
       std::size_t{2} * df_cfg.conv_kernel_size * groups;
 
@@ -304,38 +319,52 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     return std::nullopt;
   }
 
-  const auto* predecessor_tensor =
-      reader.FindTensor("selector_predecessor.weight");
-  if (predecessor_tensor == nullptr || predecessor_tensor->data == nullptr ||
-      predecessor_tensor->ElementCount() % df_cfg.selector_rank != 0) {
-    SetError(error_msg,
-             "DFlash-2 selector_predecessor.weight has invalid dimensions");
-    return std::nullopt;
-  }
-  weights.selector_predecessor =
-      TensorRef(reader, "selector_predecessor.weight");
-  if (!IsSupportedMatrixType(weights.selector_predecessor.type) ||
-      !weights.selector_predecessor.FitsAvailableStorage()) {
-    SetError(error_msg,
-             "DFlash-2 selector_predecessor.weight has unsupported storage");
-    return std::nullopt;
-  }
-  const std::size_t inferred_vocab =
-      weights.selector_predecessor.num_elements / df_cfg.selector_rank;
-  if (inferred_vocab == 0 || !std::in_range<std::uint32_t>(inferred_vocab)) {
-    SetError(error_msg, "DFlash-2 selector vocabulary size is invalid");
-    return std::nullopt;
-  }
-  config.vocab_size = static_cast<std::uint32_t>(inferred_vocab);
-  weights.config.vocab_size = config.vocab_size;
+  if (!is_v1) {
+    const auto* predecessor_tensor =
+        reader.FindTensor("selector_predecessor.weight");
+    if (predecessor_tensor == nullptr || predecessor_tensor->data == nullptr ||
+        predecessor_tensor->ElementCount() % df_cfg.selector_rank != 0) {
+      SetError(error_msg,
+               "DFlash-2 selector_predecessor.weight has invalid dimensions");
+      return std::nullopt;
+    }
+    weights.selector_predecessor =
+        TensorRef(reader, "selector_predecessor.weight");
+    if (!IsSupportedMatrixType(weights.selector_predecessor.type) ||
+        !weights.selector_predecessor.FitsAvailableStorage()) {
+      SetError(error_msg,
+               "DFlash-2 selector_predecessor.weight has unsupported storage");
+      return std::nullopt;
+    }
+    const std::size_t inferred_vocab =
+        weights.selector_predecessor.num_elements / df_cfg.selector_rank;
+    if (inferred_vocab == 0 || !std::in_range<std::uint32_t>(inferred_vocab)) {
+      SetError(error_msg, "DFlash-2 selector vocabulary size is invalid");
+      return std::nullopt;
+    }
+    config.vocab_size = static_cast<std::uint32_t>(inferred_vocab);
+    weights.config.vocab_size = config.vocab_size;
 
-  if (!BindRequiredTensor(reader, "selector_successor.weight",
-                          inferred_vocab * df_cfg.selector_rank, true,
-                          weights.selector_successor, error_msg) ||
-      !BindRequiredTensor(reader, "selector_hidden.weight",
-                          hidden * df_cfg.selector_rank, true,
-                          weights.selector_hidden, error_msg)) {
-    return std::nullopt;
+    if (!BindRequiredTensor(reader, "selector_successor.weight",
+                            inferred_vocab * df_cfg.selector_rank, true,
+                            weights.selector_successor, error_msg) ||
+        !BindRequiredTensor(reader, "selector_hidden.weight",
+                            hidden * df_cfg.selector_rank, true,
+                            weights.selector_hidden, error_msg)) {
+      return std::nullopt;
+    }
+  } else {
+    // A v1 draft carries no vocabulary of its own: it has neither a
+    // selector codebook to infer one from nor a tied output head. Its
+    // tokenizer lists the tokens the target model shares, so the vocabulary
+    // is their count.
+    const auto tokens = reader.GetMetadataStringArray("tokenizer.ggml.tokens");
+    if (tokens.empty() || !std::in_range<std::uint32_t>(tokens.size())) {
+      SetError(error_msg, "DFlash-1 GGUF is missing the tokenizer vocabulary");
+      return std::nullopt;
+    }
+    config.vocab_size = static_cast<std::uint32_t>(tokens.size());
+    weights.config.vocab_size = config.vocab_size;
   }
 
   const std::size_t encoder_input = df_cfg.target_layer_ids.size() * hidden;
@@ -346,6 +375,28 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
       !BindRequiredTensor(reader, "output_norm.weight", hidden, false,
                           weights.output_norm, error_msg)) {
     return std::nullopt;
+  }
+  // Per-tap pre-norm, applied to each captured target hidden state before
+  // concatenation and the feature-fusion projection. Optional: a v1 draft
+  // exports it, a v2 draft does not.
+  const auto aux_norm = TensorRef(reader, "enc.aux_norm.weight");
+  if (!aux_norm.empty()) {
+    if (aux_norm.num_elements != encoder_input) {
+      SetError(error_msg, "DFlash tensor 'enc.aux_norm.weight' has " +
+                              std::to_string(aux_norm.num_elements) +
+                              " elements; expected " +
+                              std::to_string(encoder_input));
+      return std::nullopt;
+    }
+    if (aux_norm.type != core::GgmlType::kF32) {
+      // LaunchDFlashTapRMSNorm reads this directly as float32; reject any
+      // other encoding rather than silently misinterpreting its bytes.
+      SetError(error_msg,
+               "DFlash tensor 'enc.aux_norm.weight' must be F32, got " +
+                   std::string(core::ToString(aux_norm.type)));
+      return std::nullopt;
+    }
+    weights.aux_norm = aux_norm;
   }
   const auto fc_scale = TensorRef(reader, "fc.scale");
   if (!fc_scale.empty() &&
@@ -392,18 +443,26 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
         !BindRequiredTensor(reader, layer_prefix + "ffn_down.weight",
                             hidden * intermediate, true, transformer.ffn_down,
                             error_msg) ||
-        !BindRequiredTensor(reader, layer_prefix + "attn_conv_base",
-                            hidden * df_cfg.conv_kernel_size * 2U, false,
-                            layer.attention_conv_base, error_msg) ||
-        !BindRequiredTensor(reader, layer_prefix + "attn_conv_proj.weight",
-                            dynamic_coefficients * hidden, true,
-                            layer.attention_conv_projection, error_msg) ||
-        !BindRequiredTensor(reader, layer_prefix + "ffn_conv_base",
-                            hidden * df_cfg.conv_kernel_size * 2U, false,
-                            layer.ffn_conv_base, error_msg) ||
-        !BindRequiredTensor(reader, layer_prefix + "ffn_conv_proj.weight",
-                            dynamic_coefficients * hidden, true,
-                            layer.ffn_conv_projection, error_msg)) {
+        // Per-head attention output gate (softplus(gate) * attention_output).
+        // Only a v1 (block-diffusion) draft carries this tensor: a v2
+        // (gated-delta-net) drafter has neither the weight nor the
+        // mechanism. Requiring it unconditionally broke the v2 drafters.
+        (is_v1 && !BindRequiredTensor(reader, layer_prefix + "attn_gate.weight",
+                                      hidden * config.num_attention_heads, true,
+                                      transformer.attn_gate, error_msg)) ||
+        (!is_v1 &&
+         (!BindRequiredTensor(reader, layer_prefix + "attn_conv_base",
+                              hidden * df_cfg.conv_kernel_size * 2U, false,
+                              layer.attention_conv_base, error_msg) ||
+          !BindRequiredTensor(reader, layer_prefix + "attn_conv_proj.weight",
+                              dynamic_coefficients * hidden, true,
+                              layer.attention_conv_projection, error_msg) ||
+          !BindRequiredTensor(reader, layer_prefix + "ffn_conv_base",
+                              hidden * df_cfg.conv_kernel_size * 2U, false,
+                              layer.ffn_conv_base, error_msg) ||
+          !BindRequiredTensor(reader, layer_prefix + "ffn_conv_proj.weight",
+                              dynamic_coefficients * hidden, true,
+                              layer.ffn_conv_projection, error_msg)))) {
       return std::nullopt;
     }
   }

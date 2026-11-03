@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "laguna",
+  "target": "gufo_laguna",
+  "kind": "static",
+  "purpose": "Laguna S 2.1 CPU reference, chat template, native tool-call dialect and ROCm runtime.",
+  "consumers": [],
+  "checks": [
+    "openai_chat_test"
+  ]
+}

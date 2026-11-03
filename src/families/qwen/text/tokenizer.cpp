@@ -369,6 +369,20 @@ std::unique_ptr<QwenTokenizer> QwenTokenizer::CreateFromGguf(
     }
   }
 
+  // Laguna's control tokens are outside the shared families: the chat
+  // template's framing and the turn terminator are single tokens, and
+  // splitting them into pieces changes what the model sees.
+  if (reader.GetMetadataString("tokenizer.ggml.pre") ==
+      std::optional<std::string_view>{"laguna"}) {
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+      const auto& t = tokens[i];
+      if (t == "<assistant>" || t == "</assistant>" ||
+          t == "\u3008|EOS|\u3009") {
+        special_tokens[t] = static_cast<TokenId>(i);
+      }
+    }
+  }
+
   auto tokenizer =
       CreateFromVocabulary(tokens, merges, special_tokens, error_msg);
   if (tokenizer == nullptr) {

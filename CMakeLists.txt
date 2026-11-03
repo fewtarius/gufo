@@ -297,6 +297,7 @@ add_library(gufo_core STATIC
   src/core/json_constraint.cpp
   src/core/json_schema_lexeme.cpp
   src/core/json_schema_regex.cpp
+  src/core/kv_codec/codec.cpp
   src/core/sampling.cpp
   src/core/sampling_logit_row.cpp
   src/core/hip/hipblaslt_plan_database.cpp
@@ -751,6 +752,11 @@ endfunction()
   target_link_libraries(sampling_test PRIVATE gufo_core)
   add_test(NAME sampling_test COMMAND sampling_test)
   set_tests_properties(sampling_test PROPERTIES LABELS "cpu;sampling")
+
+  add_executable(kv_codec_test tests/core/kv_codec_test.cpp)
+  target_link_libraries(kv_codec_test PRIVATE gufo_core)
+  add_test(NAME kv_codec_test COMMAND kv_codec_test)
+  set_tests_properties(kv_codec_test PROPERTIES LABELS "cpu;core;quant;kv")
 
   add_executable(logprobs_test tests/cli/logprobs_test.cpp)
   target_link_libraries(logprobs_test PRIVATE gufo_core)

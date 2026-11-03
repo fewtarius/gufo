@@ -106,6 +106,19 @@ public:
       std::shared_ptr<const QwenGpuModel> target_model,
       std::string* error_msg = nullptr);
 
+  /// Creates a draft bound to a target whose embedding and output head are
+  /// already on the device, so no QwenGpuModel incarnation is required.
+  ///
+  /// A model with its own GPU engine - the Laguna engine, for one - has no
+  /// QwenGpuModel to hand over, but the draft still needs the target's tied
+  /// embedding and output head.
+  [[nodiscard]] static std::shared_ptr<const QwenDFlashGpuModel> Create(
+      std::shared_ptr<const core::GgufReader> dflash_reader,
+      std::uint32_t target_hidden_size, std::uint32_t target_vocab_size,
+      std::uint32_t target_num_layers,
+      const models::QwenTensorRef& token_embedding,
+      const models::QwenTensorRef& output, std::string* error_msg = nullptr);
+
   [[nodiscard]] const speculative::QwenDFlashWeights& GetWeights()
       const noexcept {
     return weights_;
@@ -146,6 +159,15 @@ private:
                      speculative::QwenDFlashWeights weights,
                      std::vector<void*> allocations,
                      std::size_t packed_weight_bytes);
+
+  /// The work both Create overloads share.
+  [[nodiscard]] static std::shared_ptr<const QwenDFlashGpuModel> CreateImpl(
+      std::shared_ptr<const core::GgufReader> dflash_reader,
+      std::uint32_t target_hidden_size, std::uint32_t target_vocab_size,
+      std::uint32_t target_num_layers,
+      const models::QwenTensorRef& token_embedding,
+      const models::QwenTensorRef& output,
+      std::shared_ptr<const QwenGpuModel> target_model, std::string* error_msg);
 
   std::shared_ptr<const core::GgufReader> dflash_reader_;
   std::shared_ptr<const QwenGpuModel> target_model_;

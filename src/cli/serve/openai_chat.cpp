@@ -1743,54 +1743,38 @@ void ParseQwenCalls(
   }
 }
 
-// Scans native Laguna calls: the function name, then each argument spelled
-// as a key/value pair.
+// Reads the calls of a registered dialect through the shared contract.
 //
-// The dialect reaches the parser through the runtime registry, so this file
-// never links the model's scanner. The registry reports the scanned calls;
-// the schema interpretation and the OpenAI shaping stay here.
-void ParseLagunaCalls(
-    std::string_view text, ToolMarkerSet markers,
+// The dialect's scanner reports the raw calls; the schema interpretation and
+// the OpenAI shaping stay here. The core never names a model extension: the
+// dialect reaches this parser through the runtime registry.
+void ParseDialectCalls(
+    sampling::JsonConstraint::ToolFormat format, std::string_view text,
     std::span<const tokenization::ChatTool> tools,
     std::vector<ParsedToolCall>* calls,
     std::vector<std::pair<std::size_t, std::size_t>>* spans = nullptr,
     bool require_schema = false, bool partial = false) {
-  const auto* dialect =
-      ext::FindToolDialect(sampling::JsonConstraint::ToolFormat::kLaguna);
+  const auto* dialect = ext::FindToolDialect(format);
   if (dialect == nullptr || dialect->scan_tool_calls == nullptr)
     return;
-  // The dialect scanner reads one call at a time from the start of the text
-  // it is given, so hand it the first opener and offset its spans back.
-  std::size_t begin = std::string_view::npos;
-  for (const auto marker : markers) {
-    const auto found = text.find(marker);
-    if (found != std::string_view::npos &&
-        (begin == std::string_view::npos || found < begin))
-      begin = found;
-  }
-  if (begin == std::string_view::npos)
-    return;
-  const auto body = text.substr(begin);
-  std::vector<std::pair<std::size_t, std::size_t>> local;
   std::vector<ext::ScannedToolCall> scanned;
-  dialect->scan_tool_calls(body, markers, &scanned, spans ? &local : nullptr,
-                            partial);
-  // A span covers a closed envelope. An unfinished call has no markup to
-  // strip, so its span is dropped.
-  if (spans) {
-    for (std::size_t index = 0;
-         index < scanned.size() && index < local.size(); ++index) {
-      if (!scanned[index].complete)
-        continue;
-      spans->emplace_back(begin + local[index].first,
-                          begin + local[index].second);
-    }
-  }
-  for (auto& invocation : scanned) {
-    if (invocation.name.empty())
+  dialect->scan_tool_calls(text, dialect->markers, &scanned, spans, partial);
+  QuoteTracker call_quotes;
+  call_quotes.Reset(text);
+  // Where the scan resumes. A rejected argument resumes inside its own call,
+  // so the calls the scan already consumed past it are not read again.
+  std::size_t cursor = 0;
+  for (const auto& invocation : scanned) {
+    const auto marker_begin = invocation.begin;
+    if (marker_begin < cursor)
       continue;
+    // A call the model only explains is prose, not a call.
+    if (call_quotes.QuotedAt(marker_begin) ||
+        (partial && call_quotes.UnclosedAt(marker_begin)))
+      continue;
+    cursor = invocation.progress;
     ParsedToolCall call;
-    call.name = std::move(invocation.name);
+    call.name = invocation.name;
     std::optional<json::Value> schema;
     for (const auto& tool : tools) {
       if (tool.name == call.name) {
@@ -1805,6 +1789,8 @@ void ParseLagunaCalls(
       tokenization::ChatMessage::ToolArgument interpreted;
       if (!InterpretNativeParameter(schema, properties, argument.name,
                                      argument.value, &interpreted)) {
+        // Recovery resumes after the rejected argument, not after the call.
+        cursor = argument.progress;
         valid = false;
         break;
       }
@@ -1817,6 +1803,7 @@ void ParseLagunaCalls(
         call.arguments.push_back(std::move(interpreted));
       } else if (previous->value != interpreted.value ||
                  previous->is_string != interpreted.is_string) {
+        cursor = argument.progress;
         valid = false;
         break;
       }

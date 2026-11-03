@@ -638,6 +638,11 @@ struct ScannedToolArgument {
   std::string name;
   std::string value;
   bool is_string{true};
+  /// Bytes of the scanned text consumed through this argument.
+  ///
+  /// Recovery resumes at this offset when the API surface rejects the
+  /// argument. It is measured in the text the scanner was given.
+  std::size_t progress{0};
 };
 
 struct ScannedToolCall {
@@ -646,6 +651,18 @@ struct ScannedToolCall {
   std::optional<ScannedToolArgument> unfinished;
   bool valid{false};
   bool complete{false};
+  /// Where the call begins in the scanned text.
+  std::size_t begin{0};
+  /// Bytes of the scanned text consumed through this call.
+  ///
+  /// Recovery resumes at this offset when the API surface rejects the call.
+  /// It is measured in the text the scanner was given.
+  std::size_t progress{0};
+  /// Where the call's own markup ends in the scanned text.
+  ///
+  /// A dialect whose calls sit inside a larger envelope reports that
+  /// envelope's own range separately.
+  std::size_t end{0};
 };
 
 struct ToolDialect {

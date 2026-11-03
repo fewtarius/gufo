@@ -12,6 +12,10 @@ namespace {
 /// The Laguna scanner reports one call at a time; the shared contract
 /// reports every call in the scanned text, so the adapter walks the text
 /// from one call's end to the next.
+///
+/// The contract measures its offsets in the text the scanner was given, so
+/// the adapter rebases the scanner's call-relative offsets onto the call's
+/// position in that text.
 void ScanLagunaDialect(std::string_view text,
                        std::span<const std::string_view> markers,
                        std::vector<ext::ScannedToolCall>* calls,
@@ -22,9 +26,22 @@ void ScanLagunaDialect(std::string_view text,
   }
   std::size_t offset = 0;
   while (offset < text.size()) {
-    const auto scanned = ScanLagunaToolCall(text.substr(offset));
-    if (!scanned.matched) {
+    // The opener can sit anywhere in the text, and the text before it is
+    // prose. Find the earliest opener the dialect declares.
+    std::size_t begin = std::string_view::npos;
+    for (const auto marker : markers) {
+      const auto found = text.find(marker, offset);
+      if (found != std::string_view::npos && found < begin) {
+        begin = found;
+      }
+    }
+    if (begin == std::string_view::npos) {
       break;
+    }
+    const auto scanned = ScanLagunaToolCall(text.substr(begin));
+    if (!scanned.matched) {
+      offset = begin + 1;
+      continue;
     }
     ext::ScannedToolCall call;
     call.name = scanned.call ? scanned.call->name : std::string{};
@@ -33,29 +50,36 @@ void ScanLagunaDialect(std::string_view text,
         call.arguments.push_back(
             ext::ScannedToolArgument{.name = argument.name,
                                      .value = argument.value,
-                                     .is_string = true});
+                                     .is_string = true,
+                                     .progress = begin + argument.progress});
       }
       if (scanned.call->unfinished) {
         call.unfinished = ext::ScannedToolArgument{
             .name = scanned.call->unfinished->name,
             .value = scanned.call->unfinished->value,
-            .is_string = true};
+            .is_string = true,
+            .progress = begin + scanned.call->unfinished->progress};
       }
     }
     call.complete = scanned.call ? scanned.call->complete : false;
     // The shared contract marks a call valid when the scanner parsed it
     // completely; the API surface still checks the schema.
     call.valid = call.complete;
+    call.begin = begin;
+    call.progress = begin + scanned.progress;
+    // An unfinished call owns no closed envelope, so it has no end.
+    call.end = call.complete ? begin + scanned.end : 0;
     if (spans != nullptr) {
-      spans->emplace_back(offset, offset + scanned.end);
+      if (call.complete) {
+        spans->emplace_back(begin, begin + scanned.end);
+      }
     }
     calls->push_back(std::move(call));
     if (scanned.end == 0) {
       break;
     }
-    offset += scanned.end;
+    offset = begin + scanned.end;
   }
-  (void)markers;
   (void)partial;
 }
 

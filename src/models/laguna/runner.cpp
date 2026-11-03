@@ -838,6 +838,17 @@ std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
   gpu::EngineOptions engine_options;
   engine_options.max_context = max_context;
   engine_options.kv_cache_type = gpu::KvCacheType::kF16;
+  // The engine owns the drafter: it loads the DFlash model, binds the taps
+  // to this model's trunk and hands the executor to every session.
+  if (options.speculative.backend == ext::TextSpeculativeBackend::kDFlash) {
+    if (options.speculative.draft_model_path.empty()) {
+      if (error != nullptr) {
+        *error = "DFlash decoding requires --dflash-model";
+      }
+      return nullptr;
+    }
+    engine_options.dflash_model_path = options.speculative.draft_model_path;
+  }
   auto model =
       gpu::Model::Load(options.model_path, engine_options, &load_error);
   if (model == nullptr) {

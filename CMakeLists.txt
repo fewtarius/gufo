@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 project(gufo LANGUAGES C CXX)
-# Production remains Linux x86-64 on gfx1151; Windows x86-64 is a supported
-# native build target sharing the same source tree.
+# Production remains Linux or Windows x86-64 on a supported AMD GPU; Windows
+# x86-64 is a supported native build target sharing the same source tree.
 if (NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
     OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
-  message(FATAL_ERROR "Gufo requires Linux or Windows on x86-64 with an AMD gfx1151 GPU")
+  message(FATAL_ERROR "Gufo requires Linux or Windows on x86-64 with a supported AMD GPU")
 endif()
 if (WIN32)
   # Declared before any subdirectory: windows.h must never define the
@@ -84,13 +84,27 @@ set(GUFO_FFMPEG_EXECUTABLE "ffmpeg" CACHE STRING
 set(GUFO_FFPROBE_EXECUTABLE "ffprobe" CACHE STRING
   "FFprobe executable used to validate generated media")
 
-# CPU-only builds exist for host checks; production targets gfx1151 only.
-option(ENGINE_ENABLE_HIP "Build the gfx1151 HIP backend" ON)
+# CPU-only builds exist for host checks; the HIP backend targets the
+# architectures listed below.
+#
+# gfx1151 (Strix Halo) is the reference target. gfx11 (RDNA3, e.g. the
+# Radeon 780M in a 7840U) and gfx12 are also supported: RDNA3 executes the
+# wave64 mode the tuned kernels are written for, and every wave64-only
+# kernel in the tree is compiled with -mwavefrontsize64, which gfx11
+# accepts.
+set(GUFO_SUPPORTED_HIP_ARCHITECTURES
+  gfx1100 gfx1101 gfx1102 gfx1103
+  gfx1150 gfx1151 gfx1152 gfx1153
+  gfx1200 gfx1201)
+option(ENGINE_ENABLE_HIP "Build the HIP backend" ON)
 include(cmake/GufoExtensionDiscovery.cmake)
 gufo_discover_extensions()
 set(CMAKE_HIP_ARCHITECTURES gfx1151 CACHE STRING "HIP architecture")
-if (ENGINE_ENABLE_HIP AND NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1151")
-  message(FATAL_ERROR "Gufo kernels require CMAKE_HIP_ARCHITECTURES=gfx1151")
+if (ENGINE_ENABLE_HIP AND NOT CMAKE_HIP_ARCHITECTURES IN_LIST GUFO_SUPPORTED_HIP_ARCHITECTURES)
+  message(FATAL_ERROR
+    "Gufo kernels require a supported CMAKE_HIP_ARCHITECTURES. "
+    "Supported: ${GUFO_SUPPORTED_HIP_ARCHITECTURES}. "
+    "Got: ${CMAKE_HIP_ARCHITECTURES}")
 endif()
 # Standard ROCm installations; custom prefixes use CMAKE_PREFIX_PATH. As a
 # system prefix /opt/rocm is searched after CMAKE_PREFIX_PATH in the

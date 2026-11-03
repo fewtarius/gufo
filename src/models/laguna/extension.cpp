@@ -10,8 +10,8 @@ namespace {
 /// Adapts the Laguna scanner to the shared dialect contract.
 ///
 /// The Laguna scanner reports one call at a time; the shared contract
-/// reports every call in the scanned text, so the adapter walks the text
-/// from one call's end to the next.
+/// reports every call in the scanned text, so the adapter scans each opener
+/// the dialect declares.
 ///
 /// The contract measures its offsets in the text the scanner was given, so
 /// the adapter rebases the scanner's call-relative offsets onto the call's
@@ -29,10 +29,12 @@ void ScanLagunaDialect(std::string_view text,
     // The opener can sit anywhere in the text, and the text before it is
     // prose. Find the earliest opener the dialect declares.
     std::size_t begin = std::string_view::npos;
+    std::size_t opener = 0;
     for (const auto marker : markers) {
       const auto found = text.find(marker, offset);
       if (found != std::string_view::npos && found < begin) {
         begin = found;
+        opener = marker.size();
       }
     }
     if (begin == std::string_view::npos) {
@@ -40,7 +42,7 @@ void ScanLagunaDialect(std::string_view text,
     }
     const auto scanned = ScanLagunaToolCall(text.substr(begin));
     if (!scanned.matched) {
-      offset = begin + 1;
+      offset = begin + opener;
       continue;
     }
     ext::ScannedToolCall call;
@@ -69,17 +71,13 @@ void ScanLagunaDialect(std::string_view text,
     call.progress = begin + scanned.progress;
     // An unfinished call owns no closed envelope, so it has no end.
     call.end = call.complete ? begin + scanned.end : 0;
-    if (spans != nullptr) {
-      if (call.complete) {
-        spans->emplace_back(begin, begin + scanned.end);
-      }
-    }
     calls->push_back(std::move(call));
-    if (scanned.end == 0) {
-      break;
-    }
-    offset = begin + scanned.end;
+    // The API surface decides which calls it accepts, and a rejected call
+    // resumes the scan inside itself. Report every opener so that decision
+    // stays with the API surface.
+    offset = begin + opener;
   }
+  (void)spans;
   (void)partial;
 }
 

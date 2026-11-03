@@ -147,7 +147,8 @@ void ScanDeepSeekToolCalls(
                 .value = std::string(BeforePartialDelimiter(
                     text.substr(parameter_tag_end + 1),
                     DeepSeekToolSyntax::kParameterCloses[syntax])),
-                .is_string = true};
+                .is_string = true,
+                .progress = text.size()};
         }
         protected_end = text.size();
         valid = false;
@@ -182,6 +183,8 @@ void ScanDeepSeekToolCalls(
             .name = std::string(*parameter_name),
             .value = std::string(is_string ? raw : TrimAscii(raw)),
             .is_string = is_string,
+            .progress = parameter_end +
+                        DeepSeekToolSyntax::kParameterCloses[syntax].size(),
         };
         // As for Qwen calls: drop an identical repeat and reject a
         // conflicting one instead of letting the last value win.
@@ -206,6 +209,14 @@ void ScanDeepSeekToolCalls(
             .starts_with(DeepSeekToolSyntax::kInvokeCloses[syntax]);
     call.valid = valid;
     call.complete = complete;
+    // The offsets the shared contract carries. An unfinished invocation owns
+    // no closed envelope, so it has no end.
+    call.begin = invoke_start;
+    call.progress = complete
+                        ? parameter_cursor +
+                              DeepSeekToolSyntax::kInvokeCloses[syntax].size()
+                        : protected_end;
+    call.end = complete ? call.progress : 0;
     if ((valid && complete) || (partial && !call.name.empty())) {
       calls->push_back(std::move(call));
       if (!(valid && complete)) {

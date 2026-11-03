@@ -1520,8 +1520,7 @@ void TestLagunaToolCallsAreStructured() {
     FakeBackend backend;
     backend.tool_format = Format::kLaguna;
     backend.pieces = {call};
-    const auto response = gufo::server::HandleOpenAiChat(
-        Request(R"({
+    auto body = gufo::json::parse(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"read the hostname"}],
         "tools":[{
@@ -1536,8 +1535,10 @@ void TestLagunaToolCallsAreStructured() {
             }
           }
         }]
-      })"),
-                                                       backend);
+      })");
+    body["stream"] = stream;
+    const auto response =
+        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200, "Laguna tool request is accepted");
     std::string content;
     std::vector<std::string> arguments;

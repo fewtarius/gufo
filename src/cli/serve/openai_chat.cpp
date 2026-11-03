@@ -1743,35 +1743,48 @@ void ParseQwenCalls(
   }
 }
 
-// Reads the calls of a registered dialect through the shared contract.
+// Reads the native calls of the Laguna dialect through the shared contract.
 //
 // The dialect's scanner reports the raw calls; the schema interpretation and
 // the OpenAI shaping stay here. The core never names a model extension: the
 // dialect reaches this parser through the runtime registry.
-void ParseDialectCalls(
-    sampling::JsonConstraint::ToolFormat format, std::string_view text,
-    std::span<const tokenization::ChatTool> tools,
+void ParseLagunaCalls(
+    std::string_view text, std::span<const tokenization::ChatTool> tools,
     std::vector<ParsedToolCall>* calls,
     std::vector<std::pair<std::size_t, std::size_t>>* spans = nullptr,
     bool require_schema = false, bool partial = false) {
-  const auto* dialect = ext::FindToolDialect(format);
+  const auto* dialect =
+      ext::FindToolDialect(sampling::JsonConstraint::ToolFormat::kLaguna);
   if (dialect == nullptr || dialect->scan_tool_calls == nullptr)
     return;
   std::vector<ext::ScannedToolCall> scanned;
-  dialect->scan_tool_calls(text, dialect->markers, &scanned, spans, partial);
+  // The scanner reports every call in the text. Which of them the API surface
+  // accepts, and which of their markup it strips, is decided here.
+  dialect->scan_tool_calls(text, dialect->markers, &scanned, nullptr, partial);
   QuoteTracker call_quotes;
   call_quotes.Reset(text);
   // Where the scan resumes. A rejected argument resumes inside its own call,
   // so the calls the scan already consumed past it are not read again.
   std::size_t cursor = 0;
+  const auto opener_length = [&](std::size_t position) {
+    for (const auto marker : dialect->markers) {
+      if (text.substr(position).starts_with(marker))
+        return marker.size();
+    }
+    return std::size_t{0};
+  };
   for (const auto& invocation : scanned) {
     const auto marker_begin = invocation.begin;
     if (marker_begin < cursor)
       continue;
     // A call the model only explains is prose, not a call.
     if (call_quotes.QuotedAt(marker_begin) ||
-        (partial && call_quotes.UnclosedAt(marker_begin)))
+        (partial && call_quotes.UnclosedAt(marker_begin))) {
+      // The search resumes past the opener itself.
+      cursor = marker_begin + opener_length(marker_begin);
       continue;
+    }
+    // The scan resumes where the dialect's scanner stopped.
     cursor = invocation.progress;
     ParsedToolCall call;
     call.name = invocation.name;
@@ -1785,6 +1798,7 @@ void ParseDialectCalls(
     const auto* object = schema ? ResolveToolSchema(*schema, *schema) : nullptr;
     const auto* properties = object ? object->find("properties") : nullptr;
     bool valid = true;
+    bool complete = valid && invocation.complete;
     for (const auto& argument : invocation.arguments) {
       tokenization::ChatMessage::ToolArgument interpreted;
       if (!InterpretNativeParameter(schema, properties, argument.name,
@@ -1808,11 +1822,14 @@ void ParseDialectCalls(
         break;
       }
     }
-    const bool complete = valid && invocation.complete;
+    if (!valid)
+      complete = false;
     // A call whose value is still arriving is tentative: it may yet complete.
-    const bool tentative = partial && valid && schema && !require_schema &&
+    const bool tentative = partial && schema && !require_schema &&
+                           !call_quotes.UnclosedAt(marker_begin) &&
+                           !call.name.empty() &&
                            invocation.unfinished.has_value();
-    if (!complete && tentative && invocation.unfinished) {
+    if (!complete && tentative && valid && invocation.unfinished) {
       const std::string name =
           QwenParameterName(properties, invocation.unfinished->name);
       const auto* property = properties ? properties->find(name) : nullptr;
@@ -1822,25 +1839,25 @@ void ParseDialectCalls(
     if (complete && !tools.empty() &&
         std::ranges::none_of(
             tools, [&](const auto& tool) { return tool.name == call.name; }))
-      continue;
-    if (complete && require_schema) {
-      // The legacy fallback: a declared call whose complete arguments satisfy
-      // its schema.
+      complete = false;
+    if (complete && (require_schema || call_quotes.UnclosedAt(marker_begin))) {
+      // An unfinished quotation is ambiguous. Restore the legacy fallback only
+      // for a declared call whose complete arguments satisfy its schema.
       const auto tool =
           std::ranges::find(tools, call.name, &tokenization::ChatTool::name);
       if (tool == tools.end()) {
-        continue;
-      }
-      try {
-        const auto grammar = sampling::JsonConstraint::Compile(
-            json::parse(tool->parameters_json), false);
-        auto state = grammar->Start();
-        for (const unsigned char byte : ArgumentsJson(call.arguments))
-          state = grammar->Advance(state, byte);
-        if (!grammar->Complete(state))
-          continue;
-      } catch (const std::exception&) {
-        continue;
+        complete = false;
+      } else {
+        try {
+          const auto grammar = sampling::JsonConstraint::Compile(
+              json::parse(tool->parameters_json), false);
+          auto state = grammar->Start();
+          for (const unsigned char byte : ArgumentsJson(call.arguments))
+            state = grammar->Advance(state, byte);
+          complete = grammar->Complete(state);
+        } catch (const std::exception&) {
+          complete = false;
+        }
       }
     }
     if (complete || tentative) {
@@ -1850,6 +1867,13 @@ void ParseDialectCalls(
       calls->push_back(std::move(call));
       if (!complete)
         break;
+      cursor = invocation.end;
+      // The accepted call's own markup is not content.
+      if (spans && invocation.end > marker_begin)
+        spans->emplace_back(marker_begin, invocation.end);
+      // Argument bytes belong to the call, not to prose quotation state.
+      // An unmatched backtick in a file write must not quote the next call.
+      call_quotes.Reset(text, invocation.end);
     }
   }
 }
@@ -2067,7 +2091,7 @@ ParsedGeneration ParseGeneration(
     // Scanning both dialects would turn a literal call inside an argument into
     // an additional API invocation.
     if (format == sampling::JsonConstraint::ToolFormat::kLaguna)
-      ParseLagunaCalls(parsed.text, markers, tools, &parsed.tool_calls, nullptr,
+      ParseLagunaCalls(parsed.text, tools, &parsed.tool_calls, nullptr,
                        unfinished_reasoning_quote, partial);
     else if (text_from_tools.starts_with(tokenization::QwenToolSyntax::kCallOpen))
       ParseQwenCalls(parsed.text, tools, &parsed.tool_calls, nullptr,
@@ -2233,7 +2257,7 @@ ParsedGeneration ParseStructuredGeneration(
     ParsedGeneration call;
     std::vector<std::pair<std::size_t, std::size_t>> spans;
     if (format == sampling::JsonConstraint::ToolFormat::kLaguna)
-      ParseLagunaCalls(content, markers, tools, &call.tool_calls,
+      ParseLagunaCalls(content, tools, &call.tool_calls,
                        tool_only ? &spans : nullptr, false, partial);
     else
       ParseQwenCalls(content, tools, &call.tool_calls,

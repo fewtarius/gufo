@@ -354,6 +354,21 @@ bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
                         const std::int32_t* rows_out, __half* out,
                         std::size_t m, std::size_t k, hipStream_t stream);
 
+/// Paired Q4_K/Q5_K gate/up GEMM with a selectable tile width and an output
+/// scale. `tile_rows` is the number of token rows one tile covers; the
+/// supported widths are 64, 128 and 256. `out_scale` multiplies the F32
+/// result before it is narrowed to F16, so a caller whose inputs carry a
+/// quantization scale can divide it back out in the same launch. The two
+/// projections share one launch and never materialize the gate output.
+bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
+                        const __half* x, const std::int32_t* tiles,
+                        std::uint32_t n_tiles, std::uint32_t tile_rows,
+                        const std::int32_t* pad_bounds,
+                        const std::int32_t* rows_in,
+                        const std::int32_t* rows_out, __half* out,
+                        std::size_t m, std::size_t k, hipStream_t stream,
+                        float out_scale = 1.0F);
+
 /// F32/BF16/F16 projection in groups of up to eight token rows. Each token
 /// keeps the same accumulation order at every batch width.
 void SmallGemm(const void* w, WeightType type, const float* x, float* out,

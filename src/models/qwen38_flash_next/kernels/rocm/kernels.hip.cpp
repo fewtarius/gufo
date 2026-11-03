@@ -5361,20 +5361,21 @@ __device__ __forceinline__ void CodesToHalves(std::uint32_t codes,
   hi = __hfma2(__hadd2(__builtin_bit_cast(__half2, p1), magic), scale2, bias2);
 }
 
-template<WeightType kType, int BM, int BN, int BK>
-__launch_bounds__(256) __global__
-    void RoutedF16GEMMKernel(const void* __restrict__ w,
-                             const __half* __restrict__ x,
-                             const std::int32_t* __restrict__ tiles,
-                             const std::int32_t* __restrict__ pad_bounds,
-                             const std::int32_t* __restrict__ rows_in,
-                             const std::int32_t* __restrict__ rows_out,
-                             const float* __restrict__ swiglu_gate,
-                             float* __restrict__ out,
-                             __half* __restrict__ out_half, std::size_t m,
-                             std::size_t k) {
+template<WeightType kType, int BM, int BN, int BK, bool kPair = false>
+__launch_bounds__(256) __global__ void RoutedF16GEMMKernel(
+    const void* __restrict__ w, const __half* __restrict__ x,
+    const std::int32_t* __restrict__ tiles,
+    const std::int32_t* __restrict__ pad_bounds,
+    const std::int32_t* __restrict__ rows_in,
+    const std::int32_t* __restrict__ rows_out,
+    const float* __restrict__ swiglu_gate, float* __restrict__ out,
+    __half* __restrict__ out_half, std::size_t m, std::size_t k,
+    const void* __restrict__ w_up = nullptr, float out_scale = 1.0F) {
   static_assert(BM == 128 || BM == 256, "eight waves, 16-row tiles");
-  static_assert(BN % 16 == 0 && BN / 16 <= 8);
+  // A paired tile splits its wave between the gate and the up projection,
+  // so a block covers BM / 2 output rows.
+  static_assert(!kPair || BM == 128, "paired tiles need one wave pair");
+  static_assert(BN % 16 == 0 && BN / 16 <= 16);
   static_assert(BK == 2, "one stage is one 32-byte Q4_K nibble group");
   constexpr int kTokTiles = BN / 16;
   constexpr int kWaveRowTiles = BM / 128;  // 16-row tiles per wave
@@ -5433,7 +5434,10 @@ __launch_bounds__(256) __global__
   const int lane_id = tid & 31;
   const int sub_lane = lane_id & 15;
   const int half_id = lane_id >> 4;
-  const int r_block = static_cast<int>(blockIdx.x) * BM;
+  // A paired tile splits the block's rows between the gate and the up
+  // projection: the first kRows rows read `w`, the next kRows read `w_up`.
+  constexpr int kRows = kPair ? BM / 2 : BM;
+  const int r_block = static_cast<int>(blockIdx.x) * kRows;
 
   // Thread tid fetches 16-byte chunk tid % 2 of row tid / 2 + 128u.
   const int f_c = tid & 1;
@@ -5442,9 +5446,17 @@ __launch_bounds__(256) __global__
   uint4 f_header[kWaveRowTiles];
 #pragma unroll
   for (int u = 0; u < kWaveRowTiles; ++u) {
-    const int r = r_block + (tid >> 1) + (u * 128);
+    const int r =
+        r_block + (kPair ? (tid >> 1) % kRows : (tid >> 1) + (u * 128));
     f_live[u] = r < m_i;
-    f_ptr[u] = w_expert +
+    const std::uint8_t* weights = w_expert;
+    if constexpr (kPair) {
+      if ((tid >> 1) >= kRows) {
+        weights = static_cast<const std::uint8_t*>(w_up) +
+                  static_cast<std::size_t>(expert) * m * row_bytes;
+      }
+    }
+    f_ptr[u] = weights +
                static_cast<std::size_t>(f_live[u] ? r : (m_i - 1)) * row_bytes;
     f_header[u] = make_uint4(0u, 0u, 0u, 0u);
   }
@@ -5452,12 +5464,17 @@ __launch_bounds__(256) __global__
   // (scale, bias) pair is derived from the raw header word only when the
   // stage is committed, so nothing waits on the loads before the compute.
   uint4 f_codes[kWaveRowTiles];
+  // A paired tile keeps a superblock's four code groups live across the
+  // four stages that consume them, so the codes stay in registers.
+  uint4 code_cache[kWaveRowTiles][4];
   uint4 f_codes_hi[kWaveRowTiles];  ///< Q8_0: the block's second 16 codes
   uint4 f_qh[kWaveRowTiles][2];     ///< Q5_K: the superblock's high bits
   std::uint32_t f_high[kWaveRowTiles];
   std::uint32_t f_dm[kWaveRowTiles];  ///< Q8_0: d
   int f_sb32[kWaveRowTiles];          ///< Q4_K: the K block in its superblock
-  constexpr int kActFetch = BN <= 64 ? 2 : 4;
+  // A tile of BN tokens needs BN * BK * 4 sixteen-byte chunks, fetched in
+  // strides of 256 chunks per thread.
+  constexpr int kActFetch = BN <= 64 ? 2 : BN <= 128 ? 4 : (BN * 8 + 255) / 256;
   uint4 a_data[kActFetch];
   // Q5_1 chunk c is part c % kQ5Parts of row c / kQ5Parts.
   constexpr int kQ5Parts = kQ5Bytes / 16;
@@ -5533,13 +5550,45 @@ __launch_bounds__(256) __global__
         // The K sweep enters a new superblock every eight Q8-sized blocks.
         if (kb0 % 8 == 0) {
           f_header[u] = blk[0];
+          if constexpr (kPair) {
+#pragma unroll
+            for (int group = 0; group < 4; ++group)
+              code_cache[u][group] = blk[kCodeChunk + group * 2 + f_c];
+          }
           if constexpr (kQ5K) {
             f_qh[u][0] = blk[1];
             f_qh[u][1] = blk[2];
           }
         }
         const int sb32 = (kb0 % 8) + f_c;
-        f_codes[u] = blk[kCodeChunk + (sb32 / 2) * 2 + f_c];
+        if constexpr (kPair) {
+          const int group = sb32 / 2;
+          // Select register values explicitly: a runtime array index or C++
+          // conditional can become an address select and spill the cache.
+          // Three cndmask instructions per word also avoid four ANDs and
+          // three ORs. These are wave32 predicates; group is uniform.
+          const std::uint32_t low = 0u - (group & 1u);
+          const std::uint32_t high = 0u - ((group >> 1u) & 1u);
+          const auto select = [](std::uint32_t a, std::uint32_t b,
+                                 std::uint32_t mask) {
+            std::uint32_t value;
+            asm("v_cndmask_b32_e64 %0, %1, %2, %3"
+                : "=v"(value)
+                : "v"(a), "v"(b), "s"(mask));
+            return value;
+          };
+          const uint4& c0 = code_cache[u][0];
+          const uint4& c1 = code_cache[u][1];
+          const uint4& c2 = code_cache[u][2];
+          const uint4& c3 = code_cache[u][3];
+          f_codes[u] = make_uint4(
+              select(select(c0.x, c1.x, low), select(c2.x, c3.x, low), high),
+              select(select(c0.y, c1.y, low), select(c2.y, c3.y, low), high),
+              select(select(c0.z, c1.z, low), select(c2.z, c3.z, low), high),
+              select(select(c0.w, c1.w, low), select(c2.w, c3.w, low), high));
+        } else {
+          f_codes[u] = blk[kCodeChunk + (sb32 / 2) * 2 + f_c];
+        }
         f_sb32[u] = sb32;
         if constexpr (kQ5K) {
           // Bit sb32 of the 32 high-bit bytes, packed as the Q5_1 word.
@@ -5722,7 +5771,7 @@ __launch_bounds__(256) __global__
       }
 #pragma unroll
       for (int j = 0; j < kTokTiles; ++j) {
-        if constexpr ((kQ5 || kQ8) && BN >= 48) {
+        if constexpr (kPair || ((kQ5 || kQ8) && BN >= 48)) {
           // Keep one token tile's LDS fragments live at a time. Hoisting
           // all eight tiles spills registers and defeats the wider tile's
           // reuse of each weight decode. This is a compiler barrier only.
@@ -5730,7 +5779,7 @@ __launch_bounds__(256) __global__
         }
         // A short expert bucket has no output in the remaining token
         // tiles, so omit their WMMA work.
-        if constexpr ((kQ5 || kQ8) && BN >= 48 && kTokTiles > 1) {
+        if constexpr ((kPair || ((kQ5 || kQ8) && BN >= 48)) && kTokTiles > 1) {
           if (j >= live_tok_tiles)
             continue;
         }
@@ -5766,6 +5815,61 @@ __launch_bounds__(256) __global__
   fetch_stage(0);
   for (int kb0 = 0; kb0 < num_kb; kb0 += BK) {
     run_stage(kb0);
+  }
+
+  if constexpr (kPair) {
+    // Four waves compute gate rows and four compute the matching up rows.
+    // Pair them in the existing LDS allocation, keeping the K accumulation
+    // order and avoiding the gate's F32 write/read between projections.
+    // Two padding floats keep the accumulator scatter off repeated banks.
+    constexpr unsigned stride = 18;
+    constexpr unsigned plane = 16 * stride;
+    static_assert(8 * plane * sizeof(float) <= kLdsBytes);
+    float* base = reinterpret_cast<float*>(lds);
+    float* scratch = base + wave_id * plane;
+#pragma unroll
+    for (int j = 0; j < kTokTiles; ++j) {
+#pragma unroll
+      for (int l = 0; l < 8; ++l) {
+        scratch[sub_lane * stride + 2 * l + half_id] = acc[0][j][l];
+      }
+      __syncthreads();
+#pragma unroll
+      for (int unit = 0; unit < 2; ++unit) {
+        const int flat = (unit * 256 + tid) * 2;
+        const int t = t_local + j * 16 + flat / kRows;
+        const int r = flat % kRows;
+        if (t < bucket_rows && r_block + r < m_i) {
+          const std::int32_t dst = rows_out[bucket_begin + t];
+          if (dst >= 0) {
+            const int idx = (r / 16) * plane + (flat / kRows) * stride + r % 16;
+            // Preserve the separate projection epilogue's F32 evaluation
+            // order before narrowing. Fast-math can otherwise regroup the
+            // products and change an F16 rounding tie.
+            __half values[2];
+#pragma unroll
+            for (int v = 0; v < 2; ++v) {
+              float product = base[idx + v + 4 * plane] * base[idx + v];
+              asm volatile("" : "+v"(product));
+              float value = product * SigmoidF(base[idx + v]);
+              asm volatile("" : "+v"(value));
+              values[v] = __float2half(value * out_scale);
+            }
+            const auto offset = static_cast<std::size_t>(dst) * m + r_block + r;
+            if (m % 2 == 0 && r_block + r + 1 < m_i) {
+              *reinterpret_cast<__half2*>(out_half + offset) =
+                  __halves2half2(values[0], values[1]);
+            } else {
+              out_half[offset] = values[0];
+              if (r_block + r + 1 < m_i)
+                out_half[offset + 1] = values[1];
+            }
+          }
+        }
+      }
+      __syncthreads();
+    }
+    return;
   }
 
   // One wave writes a complete 128-byte line of F16 output. Padding the
@@ -7565,6 +7669,79 @@ bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
   hipLaunchKernelGGL(kernel, grid, dim3(kThreads), 0, stream, gate, up, x,
                      tiles, pad_bounds, rows_in, rows_out, out, m, k);
   return true;
+}
+
+// Paired gate/up launch on the shared routed F16 GEMM kernel, with a
+// selectable tile width and an output scale.
+//
+// The kernel pairs the gate and up rows inside one block: the first half of
+// the block's rows read `gate`, the second half read `up`, and the epilogue
+// applies SwiGLU to the pair without materializing the gate. That halves
+// the weight decode and keeps the K accumulation order of the separate
+// projections.
+//
+// `tile_rows` is the number of token rows one tile covers; it selects the
+// tile width BN. `out_scale` multiplies the F32 result before it is
+// narrowed to F16, so a caller whose inputs carry a quantization scale can
+// divide it back out without a separate pass.
+template<int BN>
+bool LaunchRoutedGatedF16(const void* gate, const void* up, WeightType type,
+                          const __half* x, const std::int32_t* tiles,
+                          std::uint32_t n_tiles, const std::int32_t* pad_bounds,
+                          const std::int32_t* rows_in,
+                          const std::int32_t* rows_out, __half* out,
+                          std::size_t m, std::size_t k, hipStream_t stream,
+                          float out_scale) {
+  // K-quant weights need complete 256-element superblocks.
+  if (m == 0 || k == 0 || k % 256 != 0 || n_tiles == 0 || out == nullptr) {
+    return false;
+  }
+  // A paired block covers BM / 2 output rows.
+  constexpr int kBM = 128;
+  constexpr int kRows = kBM / 2;
+  const dim3 grid(static_cast<unsigned int>((m + kRows - 1) / kRows), n_tiles);
+  switch (type) {
+    case WeightType::kQ4_K:
+      hipLaunchKernelGGL(
+          (RoutedF16GEMMKernel<WeightType::kQ4_K, kBM, BN, 2, true>), grid,
+          dim3(kThreads), 0, stream, gate, x, tiles, pad_bounds, rows_in,
+          rows_out, nullptr, nullptr, out, m, k, up, out_scale);
+      return true;
+    case WeightType::kQ5_K:
+      hipLaunchKernelGGL(
+          (RoutedF16GEMMKernel<WeightType::kQ5_K, kBM, BN, 2, true>), grid,
+          dim3(kThreads), 0, stream, gate, x, tiles, pad_bounds, rows_in,
+          rows_out, nullptr, nullptr, out, m, k, up, out_scale);
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
+                        const __half* x, const std::int32_t* tiles,
+                        std::uint32_t n_tiles, std::uint32_t tile_rows,
+                        const std::int32_t* pad_bounds,
+                        const std::int32_t* rows_in,
+                        const std::int32_t* rows_out, __half* out,
+                        std::size_t m, std::size_t k, hipStream_t stream,
+                        float out_scale) {
+  switch (tile_rows) {
+    case 256:
+      return LaunchRoutedGatedF16<256>(gate, up, type, x, tiles, n_tiles,
+                                       pad_bounds, rows_in, rows_out, out, m, k,
+                                       stream, out_scale);
+    case 128:
+      return LaunchRoutedGatedF16<128>(gate, up, type, x, tiles, n_tiles,
+                                       pad_bounds, rows_in, rows_out, out, m, k,
+                                       stream, out_scale);
+    case 64:
+      return LaunchRoutedGatedF16<64>(gate, up, type, x, tiles, n_tiles,
+                                      pad_bounds, rows_in, rows_out, out, m, k,
+                                      stream, out_scale);
+    default:
+      return false;
+  }
 }
 
 constexpr unsigned kSsmProjectionTileTokens = 32;

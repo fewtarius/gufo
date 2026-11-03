@@ -1030,6 +1030,29 @@ std::vector<__half> PairedSwiglu(const Routing& r, const void* gate,
   return host;
 }
 
+/// Paired gate/up launch on the shared routed F16 GEMM kernel with a
+/// selectable tile width and an output scale. This is the overload Laguna
+/// uses: it pairs the gate and up rows in one launch, selects the tile
+/// width, and scales the result before it is narrowed to F16.
+std::vector<__half> PairedSwigluTiled(const Routing& r, const void* gate,
+                                      const void* up, q::WeightType type,
+                                      const __half* x, std::size_t m,
+                                      std::size_t k, std::uint32_t tile_rows,
+                                      float out_scale = 1.0F) {
+  std::uint32_t n = 0;
+  auto* tiles = r.Tiles(tile_rows, &n);
+  auto* out = Upload(std::vector<__half>(r.slots * m, __float2half(-7.0F)));
+  if (!q::RoutedGatedF16Gemm(gate, up, type, x, tiles, n, tile_rows, r.d_bounds,
+                             r.d_rows_token, r.d_rows_slot, out, m, k, nullptr,
+                             out_scale))
+    throw std::runtime_error("tiled paired routed launch rejected");
+  CheckHip(hipDeviceSynchronize(), "tiled paired routed launch");
+  auto host = Download(out, r.slots * m);
+  (void)hipFree(tiles);
+  (void)hipFree(out);
+  return host;
+}
+
 /// Separate gate (F32) and up (SwiGLU, F16) launches at one tile height (the
 /// short-pass and decode-batch route). `gate_out` receives the F32 gate.
 std::vector<__half> SeparateSwiglu(const Routing& r, const void* gate,
@@ -1110,6 +1133,72 @@ std::vector<std::uint8_t> MakePacked(q::WeightType type, std::size_t e,
     }
   }
   return packed;
+}
+
+/// Checks the paired gate/up launch that shares the routed F16 GEMM kernel
+/// (the tile-width and output-scale overload). Every row must equal the
+/// separate gate and up projections bit for bit, and the output scale must
+/// scale the result by the same factor.
+void CheckPairedTiled() {
+  constexpr std::size_t experts = 8, rows = 64, cols = 256, tokens = 65,
+                        used = 3;
+  for (const auto type : {q::WeightType::kQ4_K, q::WeightType::kQ5_K}) {
+    const auto gate = MakePacked(type, experts, rows, cols, 0x5EED01U);
+    const auto up = MakePacked(type, experts, rows, cols, 0x5EED02U);
+    std::uint32_t state = 0x5EED03U ^ static_cast<std::uint32_t>(type);
+    std::vector<std::int32_t> ids(tokens * used);
+    for (std::size_t t = 0; t < tokens; ++t) {
+      for (std::size_t j = 0; j < used; ++j)
+        ids[t * used + j] = static_cast<std::int32_t>((t + j) % experts);
+    }
+    std::vector<__half> x(tokens * cols);
+    for (std::size_t i = 0; i < x.size(); ++i)
+      x[i] = __float2half(Uniform(&state, (i / cols) % 3 == 0 ? 0.05F : 3.0F));
+    auto* d_gate = Upload(gate);
+    auto* d_up = Upload(up);
+    auto* d_x = Upload(x);
+    const Routing routing(ids, 0, tokens, used, experts);
+    const std::string name = std::string("paired tiled ") + TypeName(type);
+    // The separate projections are the reference: the paired launch must
+    // reproduce them exactly at every tile width.
+    for (const std::uint32_t tile : {64U, 128U, 256U}) {
+      const auto separate =
+          SeparateSwiglu(routing, d_gate, d_up, type, d_x, rows, cols, 48);
+      const auto paired =
+          PairedSwigluTiled(routing, d_gate, d_up, type, d_x, rows, cols, tile);
+      if (CountDiffs(paired, 0, separate, rows,
+                     name + " tile " + std::to_string(tile)) != 0) {
+        throw std::runtime_error(name +
+                                 " differs from the separate "
+                                 "projections at tile " +
+                                 std::to_string(tile));
+      }
+    }
+    // The output scale multiplies the F32 result before the F16 narrowing,
+    // so the scaled launch is F16(value * scale), not F16(value) * scale.
+    // The two differ by one ulp near an F16 rounding tie, so compare
+    // against a tolerance of one ulp of the scaled value.
+    constexpr float kScale = 0.25F;
+    const auto scaled = PairedSwigluTiled(routing, d_gate, d_up, type, d_x,
+                                          rows, cols, 128, kScale);
+    const auto unscaled =
+        PairedSwigluTiled(routing, d_gate, d_up, type, d_x, rows, cols, 128);
+    for (std::size_t i = 0; i < scaled.size(); ++i) {
+      const float a = __half2float(scaled[i]);
+      const float b = __half2float(unscaled[i]);
+      const float want = b * kScale;
+      const float tolerance = std::max(1.0F, std::fabs(want)) *
+                              std::ldexp(1.0F, -10);  // one F16 ulp
+      if (std::fabs(a - want) > tolerance) {
+        throw std::runtime_error(name + " output scale differs at " +
+                                 std::to_string(i) + ": " + std::to_string(a) +
+                                 " vs " + std::to_string(want));
+      }
+    }
+    for (void* p : {static_cast<void*>(d_gate), static_cast<void*>(d_up),
+                    static_cast<void*>(d_x)})
+      (void)hipFree(p);
+  }
 }
 
 /// Routed F16 down projection (slot rows in and out) at one tile height.
@@ -1245,6 +1334,7 @@ int main() {
     CheckVectorGrouping();
     CheckVectorGrouping(true);
     CheckPairedMmq();
+    CheckPairedTiled();
     bool ok = true;
     // Gate/up view: 64 experts, top-10, 640 x 2560 Q4_K.
     ok = Ok(Run(q::WeightType::kQ4_K, 300, 10, 64, 640, 2560, 0x1234ABCDU)) &&

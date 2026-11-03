@@ -646,7 +646,7 @@ function(gufo_qwen_image_21_register_tests)
       ${PROJECT_SOURCE_DIR}/tests/models/qwen_image_21/weights_test.cpp)
     target_compile_definitions(qwen_image_21_weight_upload_test PRIVATE
       GUFO_TEST_WEIGHT_UPLOAD=1)
-    target_link_libraries(qwen_image_21_weight_upload_test PRIVATE gufo_qwen_image_21 gufo_qwen_image_21_hip)
+    target_link_libraries(qwen_image_21_weight_upload_test PRIVATE gufo_qwen_image_21 gufo_qwen_image_21_hip hip::host)
     add_test(NAME qwen_image_21_weight_upload_test COMMAND qwen_image_21_weight_upload_test)
     set_tests_properties(qwen_image_21_weight_upload_test PROPERTIES
       LABELS "gpu;qwen-image" SKIP_RETURN_CODE 77)
@@ -770,7 +770,7 @@ endfunction()
     tests/cli/openai_chat_test.cpp
   )
   target_link_libraries(openai_chat_test PRIVATE gufo_core gufo_logging gufo_http
-    gufo_deepseek_v4_flash_text ${GUFO_QWEN_LIBRARIES})
+    gufo_deepseek_v4_flash_text gufo_laguna ${GUFO_QWEN_LIBRARIES})
   add_test(NAME openai_chat_test COMMAND openai_chat_test)
   set_tests_properties(openai_chat_test PROPERTIES
     LABELS "cpu;server;api;openai;streaming;tools")

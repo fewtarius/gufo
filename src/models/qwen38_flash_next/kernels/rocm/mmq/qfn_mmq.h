@@ -25,6 +25,20 @@ int qfn_mmq_q8_0_dense(
     int           K,
     hipStream_t  stream);
 
+// qfn_mmq_q8_0_dense split into quantize + GEMM, in mul_mat_q's own MMQ tile
+// layout (distinct from qfn_mmq_quantize_q8_1's vec layout below). Lets a
+// caller issuing several dense projections against the same X_f32 (e.g. a
+// shared row-normed activation feeding Q/K/V or a gate/up pair) quantize
+// once and reuse the buffer across calls.
+size_t qfn_mmq_q8_1_mmq_bytes(int N, int K);
+
+int qfn_mmq_quantize_q8_1_mmq(const float* X_f32, void* X_q8_1_mmq, int N,
+                              int K, hipStream_t stream);
+
+int qfn_mmq_q8_0_dense_gemm_preq(const void* W_q8_0, const void* X_q8_1_mmq,
+                                 float* out_f32, int M, int N, int K,
+                                 hipStream_t stream);
+
 int qfn_mmq_q4_K_moe_pair_unique(const void* W_a, const void* W_b,
                                  const float* X_f32, const int32_t* ids,
                                  float* out_a, float* out_b, int M, int K,
@@ -38,6 +52,12 @@ int qfn_mmq_moe_vec(int weight_type, const void* W, const float* X_f32,
                     const int32_t* ids, float* out, int M, int K, int n_tokens,
                     int n_experts, int n_expert_used, hipStream_t stream,
                     const void* W_b = nullptr, float* out_b = nullptr);
+
+// Dense Q4_K/Q5_K/Q5_1/Q4_1/Q6_K projection of 1-8 tokens in one launch; each
+// weight row is read once for all tokens. out is [n_tokens][M].
+int qfn_mmq_dense_vec(int weight_type, const void* W, const float* X_f32,
+                      float* out, int M, int K, int n_tokens,
+                      hipStream_t stream);
 
 // Q4_K/Q5_K/Q8_0 gate/up for 1–8 tokens, with the SwiGLU result in out.
 // Q4_K also accepts up to 64 independent rows, grouped by expert.

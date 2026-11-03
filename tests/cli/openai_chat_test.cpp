@@ -25,6 +25,10 @@ namespace gufo::models::deepseek_v4_flash {
 void RegisterToolDialect();
 }
 
+namespace gufo::models::laguna {
+void RegisterToolDialect();
+}
+
 using gufo::tokenization::kImEnd;
 
 namespace {
@@ -1500,6 +1504,68 @@ void TestDeepSeekToolCallsAreStructured() {
   Expect(
       response.body.find(R"(\"path\":\"/etc/hostname\")") != std::string::npos,
       "Hybrid DeepSeek tool arguments are translated");
+}
+
+// The Laguna dialect names the function directly after the opener and spells
+// each argument as a key/value pair. The dialect reaches the parser through
+// the runtime registry, so the test registers it the way the model extension
+// does and drives the same scanner the model ships.
+void TestLagunaToolCallsAreStructured() {
+  gufo::models::laguna::RegisterToolDialect();
+  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  const auto call =
+      "<tool_call>read<arg_key>path</arg_key>"
+      "<arg_value>/etc/hostname</arg_value></tool_call>";
+  for (const bool stream : {false, true}) {
+    FakeBackend backend;
+    backend.tool_format = Format::kLaguna;
+    backend.pieces = {call};
+    const auto response = gufo::server::HandleOpenAiChat(
+        Request(R"({
+        "model":"test-model",
+        "messages":[{"role":"user","content":"read the hostname"}],
+        "tools":[{
+          "type":"function",
+          "function":{
+            "name":"read",
+            "description":"Read a file",
+            "parameters":{
+              "type":"object",
+              "properties":{"path":{"type":"string"}},
+              "required":["path"]
+            }
+          }
+        }]
+      })"),
+                                                       backend);
+    Expect(response.status == 200, "Laguna tool request is accepted");
+    std::string content;
+    std::vector<std::string> arguments;
+    const auto collect = [&](const gufo::json::Value& event) {
+      for (const auto& choice : event.find("choices")->items()) {
+        const auto* message = choice.find(stream ? "delta" : "message");
+        content += message->member_str("content");
+        if (const auto* found = message->find("tool_calls"))
+          for (const auto& item : found->items())
+            arguments.push_back(
+                item.find("function")->member_str("arguments"));
+      }
+    };
+    if (stream) {
+      response.streaming_body([&](std::string_view chunk) {
+        const auto payload = chunk.substr(chunk.find("data: ") + 6);
+        if (!payload.starts_with("[DONE]"))
+          collect(gufo::json::parse(payload));
+        return true;
+      });
+    } else {
+      collect(gufo::json::parse(response.body));
+    }
+    Expect(arguments == std::vector<std::string>{R"({"path":"/etc/hostname"})"},
+           "the Laguna call is translated to an OpenAI tool call");
+    Expect(content.find("arg_value") == std::string::npos,
+           "the Laguna markup is not visible content");
+  }
 }
 
 void TestDeepSeekRepeatedToolParameters() {
@@ -6948,6 +7014,7 @@ int main() {
   TestQwenToolBoundariesAndSchema();
   TestDeepSeekToolCallsAreStructured();
   TestDeepSeekRepeatedToolParameters();
+  TestLagunaToolCallsAreStructured();
   TestDeepSeekSchemaCheckedArguments();
   TestStreamingStopsAtRejectedParameter();
   TestWrongModelIsRejected();

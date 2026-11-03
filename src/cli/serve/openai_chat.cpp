@@ -145,6 +145,12 @@ ToolMarkerSet ToolMarkers(
   // their native call syntax; keep recognizing every opener there.
   if (!format || *format == Format::kJson)
     return kToolMarkers;
+  // A model that registers its own dialect brings its own openers.
+  if (const auto* dialect = ext::FindToolDialect(*format)) {
+    if (!dialect->markers.empty()) {
+      return ToolMarkerSet(dialect->markers);
+    }
+  }
   // Match the canonical opener selected by JsonConstraint::WithTools. Other
   // dialects are ordinary prose under that grammar, not additional calls.
   return *format == Format::kDeepSeek ? ToolMarkerSet(deepseek)
@@ -153,12 +159,23 @@ ToolMarkerSet ToolMarkers(
 
 // A native function header, rather than a bare marker mentioned in prose,
 // permits the implicit reasoning boundary used by llama.cpp's native parsers.
-ToolMarkerSet ReasoningToolMarkers(ToolMarkerSet markers) {
+ToolMarkerSet ReasoningToolMarkers(
+    ToolMarkerSet markers,
+    std::optional<sampling::JsonConstraint::ToolFormat> format) {
+  using Format = sampling::JsonConstraint::ToolFormat;
   static constexpr std::array<std::string_view, 1> qwen{
       tokenization::QwenToolSyntax::kNativeCallOpen};
   static constexpr std::array<std::string_view, 2> deepseek{
       "\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"",
       "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\""};
+  // A model that registers its own dialect brings its own native header.
+  if (format) {
+    if (const auto* dialect = ext::FindToolDialect(*format)) {
+      if (!dialect->reasoning_markers.empty()) {
+        return ToolMarkerSet(dialect->reasoning_markers);
+      }
+    }
+  }
   if (markers.size() == 1 &&
       markers.front() == tokenization::QwenToolSyntax::kCallOpen)
     return qwen;
@@ -207,6 +224,12 @@ ToolCloserSet ToolClosers(
   // and another dialect's closing tags are ordinary prose like its openers —
   // the client's envelope excepted, which no dialect admits and every one of
   // them parses.
+  // A model that registers its own dialect brings its own closers.
+  if (const auto* dialect = ext::FindToolDialect(*format)) {
+    if (!dialect->closers.empty()) {
+      return ToolCloserSet(dialect->closers);
+    }
+  }
   return kQwenClosers;
 }
 
@@ -1529,33 +1552,33 @@ std::string QwenParameterName(const json::Value* properties,
              : std::string(Trim(spelled));
 }
 
-// Interprets one scanned Qwen parameter against the advertised schema. Qwen's
-// XML-like arguments carry no type marker, so the schema decides whether the
+// Interprets one scanned native parameter against the advertised schema. The
+// native dialects carry no type marker, so the schema decides whether the
 // value is a string or JSON; without one the raw text is kept.
-bool InterpretQwenParameter(
+bool InterpretNativeParameter(
     const std::optional<json::Value>& schema, const json::Value* properties,
-    const tokenization::QwenToolCallParameter& parameter,
+    std::string_view parameter_name, std::string_view parameter_value,
     tokenization::ChatMessage::ToolArgument* argument) {
-  const std::string name = QwenParameterName(properties, parameter.name);
+  const std::string name = QwenParameterName(properties, parameter_name);
   if (name.empty())
     return false;
   const auto* property = properties ? properties->find(name) : nullptr;
   const bool string_allowed =
       !property || SchemaAccepts(*schema, *property,
-                                 json::Value(std::string(parameter.value)));
+                                 json::Value(std::string(parameter_value)));
   // Prefer text if the schema permits it; parsing ambiguous scalars as JSON
   // would silently change a caller's declared string type. A union also
   // admitting other types tries those first, as llama.cpp's qwen3-coder
   // parser does.
   std::optional<json::Value> typed;
   if (string_allowed && property) {
-    typed = TryParseJson(Trim(parameter.value));
+    typed = TryParseJson(Trim(parameter_value));
     if (!typed || typed->is_string() ||
         !SchemaAccepts(*schema, *property, *typed))
       typed.reset();
   }
   const bool is_string = string_allowed && !typed;
-  std::string raw(is_string ? parameter.value : Trim(parameter.value));
+  std::string raw(is_string ? parameter_value : Trim(parameter_value));
   if (!is_string && !typed) {
     auto parsed = TryParseJson(raw);
     if (parsed && !SchemaAccepts(*schema, *property, *parsed))
@@ -1576,6 +1599,15 @@ bool InterpretQwenParameter(
   }
   *argument = {.name = name, .value = std::move(raw), .is_string = is_string};
   return true;
+}
+
+// Interprets one scanned Qwen parameter against the advertised schema.
+bool InterpretQwenParameter(
+    const std::optional<json::Value>& schema, const json::Value* properties,
+    const tokenization::QwenToolCallParameter& parameter,
+    tokenization::ChatMessage::ToolArgument* argument) {
+  return InterpretNativeParameter(schema, properties, parameter.name,
+                                   parameter.value, argument);
 }
 
 void ParseQwenCalls(
@@ -1711,6 +1743,130 @@ void ParseQwenCalls(
   }
 }
 
+// Scans native Laguna calls: the function name, then each argument spelled
+// as a key/value pair.
+//
+// The dialect reaches the parser through the runtime registry, so this file
+// never links the model's scanner. The registry reports the scanned calls;
+// the schema interpretation and the OpenAI shaping stay here.
+void ParseLagunaCalls(
+    std::string_view text, ToolMarkerSet markers,
+    std::span<const tokenization::ChatTool> tools,
+    std::vector<ParsedToolCall>* calls,
+    std::vector<std::pair<std::size_t, std::size_t>>* spans = nullptr,
+    bool require_schema = false, bool partial = false) {
+  const auto* dialect =
+      ext::FindToolDialect(sampling::JsonConstraint::ToolFormat::kLaguna);
+  if (dialect == nullptr || dialect->scan_tool_calls == nullptr)
+    return;
+  // The dialect scanner reads one call at a time from the start of the text
+  // it is given, so hand it the first opener and offset its spans back.
+  std::size_t begin = std::string_view::npos;
+  for (const auto marker : markers) {
+    const auto found = text.find(marker);
+    if (found != std::string_view::npos &&
+        (begin == std::string_view::npos || found < begin))
+      begin = found;
+  }
+  if (begin == std::string_view::npos)
+    return;
+  const auto body = text.substr(begin);
+  std::vector<std::pair<std::size_t, std::size_t>> local;
+  std::vector<ext::ScannedToolCall> scanned;
+  dialect->scan_tool_calls(body, markers, &scanned, spans ? &local : nullptr,
+                            partial);
+  // A span covers a closed envelope. An unfinished call has no markup to
+  // strip, so its span is dropped.
+  if (spans) {
+    for (std::size_t index = 0;
+         index < scanned.size() && index < local.size(); ++index) {
+      if (!scanned[index].complete)
+        continue;
+      spans->emplace_back(begin + local[index].first,
+                          begin + local[index].second);
+    }
+  }
+  for (auto& invocation : scanned) {
+    if (invocation.name.empty())
+      continue;
+    ParsedToolCall call;
+    call.name = std::move(invocation.name);
+    std::optional<json::Value> schema;
+    for (const auto& tool : tools) {
+      if (tool.name == call.name) {
+        schema = TryParseJson(tool.parameters_json);
+        break;
+      }
+    }
+    const auto* object = schema ? ResolveToolSchema(*schema, *schema) : nullptr;
+    const auto* properties = object ? object->find("properties") : nullptr;
+    bool valid = true;
+    for (const auto& argument : invocation.arguments) {
+      tokenization::ChatMessage::ToolArgument interpreted;
+      if (!InterpretNativeParameter(schema, properties, argument.name,
+                                     argument.value, &interpreted)) {
+        valid = false;
+        break;
+      }
+      // Models sometimes repeat an argument. An identical copy is harmless;
+      // conflicting copies leave no safe choice.
+      const auto previous =
+          std::ranges::find(call.arguments, interpreted.name,
+                            [](const auto& arg) { return arg.name; });
+      if (previous == call.arguments.end()) {
+        call.arguments.push_back(std::move(interpreted));
+      } else if (previous->value != interpreted.value ||
+                 previous->is_string != interpreted.is_string) {
+        valid = false;
+        break;
+      }
+    }
+    const bool complete = valid && invocation.complete;
+    // A call whose value is still arriving is tentative: it may yet complete.
+    const bool tentative = partial && valid && schema && !require_schema &&
+                           invocation.unfinished.has_value();
+    if (!complete && tentative && invocation.unfinished) {
+      const std::string name =
+          QwenParameterName(properties, invocation.unfinished->name);
+      const auto* property = properties ? properties->find(name) : nullptr;
+      if (!name.empty() && (!property || StringOnly(*schema, *property)))
+        PartialStringArgument(call, name, invocation.unfinished->value);
+    }
+    if (complete && !tools.empty() &&
+        std::ranges::none_of(
+            tools, [&](const auto& tool) { return tool.name == call.name; }))
+      continue;
+    if (complete && require_schema) {
+      // The legacy fallback: a declared call whose complete arguments satisfy
+      // its schema.
+      const auto tool =
+          std::ranges::find(tools, call.name, &tokenization::ChatTool::name);
+      if (tool == tools.end()) {
+        continue;
+      }
+      try {
+        const auto grammar = sampling::JsonConstraint::Compile(
+            json::parse(tool->parameters_json), false);
+        auto state = grammar->Start();
+        for (const unsigned char byte : ArgumentsJson(call.arguments))
+          state = grammar->Advance(state, byte);
+        if (!grammar->Complete(state))
+          continue;
+      } catch (const std::exception&) {
+        continue;
+      }
+    }
+    if (complete || tentative) {
+      call.id = RandomId("call_");
+      if (!complete && !call.partial_arguments)
+        call.partial_arguments = ArgumentsPrefix(call);
+      calls->push_back(std::move(call));
+      if (!complete)
+        break;
+    }
+  }
+}
+
 // Counts the argument prefix accepted by the advertised schema. A
 // `string="false"` value that fails its declared type rejects the call, as for
 // Qwen. Streaming keeps only the arguments before that rejection; strings and
@@ -1809,8 +1965,9 @@ ParsedGeneration ParseGeneration(
     TextGenerationBackend::InitialOutputState initial_output_state,
     std::span<const tokenization::ChatTool> tools,
     ChatRequest::ToolChoice choice, bool enforce_required,
-    ToolMarkerSet markers, ToolCloserSet closers, QuoteTracker& quotes,
-    bool partial = false, bool track_text = false) {
+    ToolMarkerSet markers, ToolCloserSet closers,
+    std::optional<sampling::JsonConstraint::ToolFormat> format,
+    QuoteTracker& quotes, bool partial = false, bool track_text = false) {
   quotes.Reset(raw);
   ParsedGeneration parsed;
   std::string_view content = raw;
@@ -1922,7 +2079,10 @@ ParsedGeneration ParseGeneration(
     // The outer envelope selects the format, as in llama.cpp's model parsers.
     // Scanning both dialects would turn a literal call inside an argument into
     // an additional API invocation.
-    if (text_from_tools.starts_with(tokenization::QwenToolSyntax::kCallOpen))
+    if (format == sampling::JsonConstraint::ToolFormat::kLaguna)
+      ParseLagunaCalls(parsed.text, markers, tools, &parsed.tool_calls, nullptr,
+                       unfinished_reasoning_quote, partial);
+    else if (text_from_tools.starts_with(tokenization::QwenToolSyntax::kCallOpen))
       ParseQwenCalls(parsed.text, tools, &parsed.tool_calls, nullptr,
                      unfinished_reasoning_quote, partial);
     else
@@ -1942,7 +2102,8 @@ ParsedGeneration ParseGeneration(
         parsed = ParseGeneration(
             reasoning_call_context.substr(end + kThinkEnd.size()),
             TextGenerationBackend::InitialOutputState::kContent, tools, choice,
-            enforce_required, markers, closers, quotes, partial, track_text);
+            enforce_required, markers, closers, format, quotes, partial,
+            track_text);
         RebaseTextSpans(parsed,
                         static_cast<std::size_t>(reasoning_call_context.data() -
                                                  raw.data()) +
@@ -2017,8 +2178,9 @@ ParsedGeneration ParseStructuredGeneration(
     std::string_view raw, TextGenerationBackend::InitialOutputState initial,
     std::span<const tokenization::ChatTool> tools,
     ChatRequest::ToolChoice choice, bool enforce_required, bool tool_only,
-    ToolMarkerSet markers, ToolCloserSet closers, QuoteTracker& quotes,
-    bool partial = false, bool track_text = false) {
+    ToolMarkerSet markers, ToolCloserSet closers,
+    std::optional<sampling::JsonConstraint::ToolFormat> format,
+    QuoteTracker& quotes, bool partial = false, bool track_text = false) {
   ParsedGeneration parsed;
   const auto source = raw;
   if (initial == TextGenerationBackend::InitialOutputState::kAuto) {
@@ -2036,7 +2198,8 @@ ParsedGeneration ParseStructuredGeneration(
     quotes.Reset(raw);
     const auto call =
         !tools.empty() && choice != ChatRequest::ToolChoice::kNone
-            ? ReasoningToolMarker(raw, ReasoningToolMarkers(markers), quotes)
+            ? ReasoningToolMarker(raw, ReasoningToolMarkers(markers, format),
+                                  quotes)
             : std::string_view::npos;
     if (call < end) {
       if (partial && quotes.UnclosedAt(call))
@@ -2060,7 +2223,7 @@ ParsedGeneration ParseStructuredGeneration(
           tokenization::QwenToolSyntax::kCallOpen)) {
     auto native = ParseGeneration(
         content, TextGenerationBackend::InitialOutputState::kContent, tools,
-        choice, enforce_required, markers, closers, quotes, partial,
+        choice, enforce_required, markers, closers, format, quotes, partial,
         track_text);
     RebaseTextSpans(native, content.data() - source.data());
     native.reasoning_content = std::move(parsed.reasoning_content);
@@ -2082,8 +2245,12 @@ ParsedGeneration ParseStructuredGeneration(
        ToolMarkerPrefix(content, markers))) {
     ParsedGeneration call;
     std::vector<std::pair<std::size_t, std::size_t>> spans;
-    ParseQwenCalls(content, tools, &call.tool_calls,
-                   tool_only ? &spans : nullptr, false, partial);
+    if (format == sampling::JsonConstraint::ToolFormat::kLaguna)
+      ParseLagunaCalls(content, markers, tools, &call.tool_calls,
+                       tool_only ? &spans : nullptr, false, partial);
+    else
+      ParseQwenCalls(content, tools, &call.tool_calls,
+                     tool_only ? &spans : nullptr, false, partial);
     if (tool_only) {
       const auto append = [&](std::string_view part) {
         call.text += part;
@@ -2292,6 +2459,7 @@ public:
       TextGenerationBackend::InitialOutputState initial_output_state,
       EmitCallback emit_piece, bool structured, bool tool_only,
       bool recognize_tools, ToolMarkerSet markers, ToolCloserSet closers,
+      std::optional<sampling::JsonConstraint::ToolFormat> format,
       std::span<const tokenization::ChatTool> tools)
       : emit_piece_(std::move(emit_piece)),
         raw_content_(structured || tool_only),
@@ -2299,6 +2467,7 @@ public:
         recognize_tools_(recognize_tools),
         markers_(markers),
         closers_(closers),
+        format_(format),
         tools_(tools) {
     if (initial_output_state ==
         TextGenerationBackend::InitialOutputState::kReasoning) {
@@ -2367,7 +2536,7 @@ public:
                                       ? std::string::npos
                                       : think_found - offset;
       const auto thinking_markers =
-          raw_content_ ? ReasoningToolMarkers(markers_) : markers_;
+          raw_content_ ? ReasoningToolMarkers(markers_, format_) : markers_;
       const auto found =
           !recognize_tools_ ? std::string::npos
           : raw_content_
@@ -2615,6 +2784,7 @@ private:
   ToolMarkerSet markers_;
   QuoteTracker quotes_;
   ToolCloserSet closers_;
+  std::optional<sampling::JsonConstraint::ToolFormat> format_;
   std::span<const tokenization::ChatTool> tools_;
   std::size_t emitted_content_bytes_{0};
   std::size_t emitted_reasoning_bytes_{0};
@@ -2697,8 +2867,10 @@ private:
 ParsedGeneration StreamingGeneration(
     const StreamingTextFilter& filter, const ChatRequest& chat,
     TextGenerationBackend::InitialOutputState initial, ToolMarkerSet markers,
-    ToolCloserSet closers, QuoteTracker& quotes, bool enforce_required,
-    bool partial = false, bool track_text = false) {
+    ToolCloserSet closers,
+    std::optional<sampling::JsonConstraint::ToolFormat> format,
+    QuoteTracker& quotes, bool enforce_required, bool partial = false,
+    bool track_text = false) {
   // Native grammars establish argument framing before the value completes.
   // Recovery from unconstrained/JSON fallback text still requires a full call.
   partial = partial && markers.size() <= 2;
@@ -2707,10 +2879,10 @@ ParsedGeneration StreamingGeneration(
                    filter.raw(), initial, chat.tools, chat.tool_choice,
                    enforce_required,
                    chat.constrained_tools && !chat.response_format, markers,
-                   closers, quotes, partial, track_text)
+                   closers, format, quotes, partial, track_text)
              : ParseGeneration(filter.raw(), initial, chat.tools,
                                chat.tool_choice, enforce_required, markers,
-                               closers, quotes, partial, track_text);
+                               closers, format, quotes, partial, track_text);
 }
 
 // Responses uses semantic SSE events, rather than Chat Completions chunks.
@@ -3008,12 +3180,12 @@ HttpResponse NonStreamingResponse(
                 result.finish_reason ==
                     TextGenerationBackend::FinishReason::kStop,
                 request.chat.constrained_tools && !request.chat.response_format,
-                markers, closers, quotes)
+                markers, closers, format, quotes)
           : ParseGeneration(decoded, initial_output_state, request.chat.tools,
                             request.chat.tool_choice,
                             result.finish_reason ==
                                 TextGenerationBackend::FinishReason::kStop,
-                            markers, closers, quotes);
+                            markers, closers, format, quotes);
 
   json::Value response = json::Value::object();
   response["id"] = RandomId("chatcmpl-");
@@ -3086,7 +3258,7 @@ HttpResponse StreamingResponse(
           },
       .streaming_body =
           [request, generation = std::move(generation), id, created, model,
-           initial_output_state, markers, closers,
+           initial_output_state, markers, closers, format,
            stream_log](const HttpResponse::BodyWriter& writer) {
             bool connected = true;
             bool started = false;
@@ -3133,7 +3305,7 @@ HttpResponse StreamingResponse(
                 request.chat.constrained_tools && !request.chat.response_format,
                 !request.chat.tools.empty() &&
                     request.chat.tool_choice != ChatRequest::ToolChoice::kNone,
-                markers, closers, request.chat.tools);
+                markers, closers, format, request.chat.tools);
             StreamingToolCalls tools([&](const ToolDelta& call) {
               // Completion without additional arguments needs no Chat delta.
               if (call.id.empty() && call.arguments.empty())
@@ -3178,7 +3350,8 @@ HttpResponse StreamingResponse(
                         !tools.Update(StreamingGeneration(filter, request.chat,
                                                           initial_output_state,
                                                           markers, closers,
-                                                          quotes, false, true)
+                                                          format, quotes, false,
+                                                          true)
                                           .tool_calls))
                       return false;
                     if (pending_logprobs)
@@ -3201,7 +3374,7 @@ HttpResponse StreamingResponse(
                   TextGenerationBackend::FinishReason::kStop;
               const auto generated = StreamingGeneration(
                   filter, request.chat, initial_output_state, markers, closers,
-                  quotes, !interrupted);
+                  format, quotes, !interrupted);
               if (!tools.Finish(generated.tool_calls, interrupted))
                 return;
               if (!filter.Finish(generated.hide_tool_markup, generated.text,
@@ -3905,7 +4078,7 @@ HttpResponse CreateCompatibilityResponse(
   const auto closers = ToolClosers(format);
   auto stream_log = std::make_shared<HttpResponse::StreamLog>();
   auto timing = std::make_shared<std::string>();
-  const auto run = [generation, initial, chat, markers, closers,
+  const auto run = [generation, initial, chat, markers, closers, format,
                     model = requested_model.empty()
                                 ? backend.model_id()
                                 : std::string(requested_model),
@@ -3952,7 +4125,7 @@ HttpResponse CreateCompatibilityResponse(
         chat.constrained_tools && !chat.response_format,
         !chat.tools.empty() &&
             chat.tool_choice != ChatRequest::ToolChoice::kNone,
-        markers, closers, chat.tools);
+        markers, closers, format, chat.tools);
     StreamingToolCalls tools([&](const ToolDelta& call) {
       if (output.Tool(call))
         return true;
@@ -3978,7 +4151,8 @@ HttpResponse CreateCompatibilityResponse(
                       return !filter.in_tools() || markers.size() > 2 ||
                              tools.Update(StreamingGeneration(
                                               filter, chat, initial, markers,
-                                              closers, quotes, false, true)
+                                              closers, format, quotes, false,
+                                              true)
                                               .tool_calls);
                     },
                     on_progress, begin)
@@ -4008,8 +4182,8 @@ HttpResponse CreateCompatibilityResponse(
       const bool interrupted =
           result.finish_reason != TextGenerationBackend::FinishReason::kStop;
       const auto generated =
-          StreamingGeneration(filter, chat, initial, markers, closers, quotes,
-                              !interrupted, false, observe);
+          StreamingGeneration(filter, chat, initial, markers, closers, format,
+                              quotes, !interrupted, false, observe);
       if (!tools.Finish(generated.tool_calls, interrupted)) {
         generation->Cancel();
         return json::Value();

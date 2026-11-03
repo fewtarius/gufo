@@ -270,7 +270,6 @@ add_library(gufo_diagnostics STATIC
   src/core/diagnostics/bandwidth.cpp
   src/core/hip/bandwidth.cpp
   src/core/diagnostics/report.cpp
-  src/cli/diagnose/diagnose.cpp
 )
 target_include_directories(gufo_diagnostics PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(gufo_diagnostics PUBLIC gufo_platform)
@@ -408,8 +407,9 @@ target_link_libraries(gufo_http PUBLIC gufo_logging gufo_ext_runtime gufo_core g
 
 add_executable(gufo
   src/cli/main.cpp
-  src/cli/extension_diagnostics.cpp
   src/cli/banner.cpp
+  src/cli/diagnose/diagnose.cpp
+  src/cli/extension_diagnostics.cpp
   src/cli/eval/eval.cpp
   src/cli/transcribe/transcribe.cpp
   src/cli/speak/speak.cpp

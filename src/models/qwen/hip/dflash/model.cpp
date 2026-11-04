@@ -418,6 +418,9 @@ std::shared_ptr<const QwenDFlashGpuModel> QwenDFlashGpuModel::CreateImpl(
   auto raw_weights =
       speculative::QwenDFlashWeights::LoadFromGguf(*dflash_reader, error_msg);
   if (!raw_weights.has_value()) {
+    if (error_msg != nullptr && error_msg->empty()) {
+      *error_msg = "DFlash GGUF could not be loaded";
+    }
     return nullptr;
   }
 

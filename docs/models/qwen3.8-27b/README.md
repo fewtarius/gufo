@@ -5,7 +5,7 @@ Dense text/image model on gfx1151. Production target GGUFs are **UD-Q4_K_XL**
 draft/projector need additional memory. BF16 targets are reference-only.
 
 [Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-· [ROCm 10.1 migration](ROCM.md)
+· [q8_0 KV cache](KV-Q8.md) · [ROCm 10.1 migration](ROCM.md)
 
 ## Load and run
 

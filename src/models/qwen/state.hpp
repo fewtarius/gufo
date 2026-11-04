@@ -154,6 +154,17 @@ struct QwenLayerWeights {
   QwenTensorRef ffn_gate;
   QwenTensorRef ffn_up;
   QwenTensorRef ffn_down;
+
+  // Mixture-of-experts feed-forward. A MoE layer uses these instead of
+  // the dense feed-forward above.
+  QwenTensorRef ffn_gate_inp;        ///< router, [experts][hidden]
+  QwenTensorRef ffn_gate_exps;       ///< [experts][ff][hidden]
+  QwenTensorRef ffn_up_exps;         ///< [experts][ff][hidden]
+  QwenTensorRef ffn_down_exps;       ///< [experts][hidden][ff]
+  QwenTensorRef ffn_gate_shexp;      ///< shared expert gate
+  QwenTensorRef ffn_up_shexp;        ///< shared expert up
+  QwenTensorRef ffn_down_shexp;      ///< shared expert down
+  QwenTensorRef ffn_gate_inp_shexp;  ///< shared expert scalar gate, [hidden]
 };
 
 /// Full model tensor references mapped directly from GGUF storage.

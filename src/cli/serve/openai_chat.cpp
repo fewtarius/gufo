@@ -1607,7 +1607,7 @@ bool InterpretQwenParameter(
     const tokenization::QwenToolCallParameter& parameter,
     tokenization::ChatMessage::ToolArgument* argument) {
   return InterpretNativeParameter(schema, properties, parameter.name,
-                                   parameter.value, argument);
+                                  parameter.value, argument);
 }
 
 void ParseQwenCalls(
@@ -1802,7 +1802,7 @@ void ParseLagunaCalls(
     for (const auto& argument : invocation.arguments) {
       tokenization::ChatMessage::ToolArgument interpreted;
       if (!InterpretNativeParameter(schema, properties, argument.name,
-                                     argument.value, &interpreted)) {
+                                    argument.value, &interpreted)) {
         // Recovery resumes after the rejected argument, not after the call.
         cursor = argument.progress;
         valid = false;
@@ -2093,7 +2093,8 @@ ParsedGeneration ParseGeneration(
     if (format == sampling::JsonConstraint::ToolFormat::kLaguna)
       ParseLagunaCalls(parsed.text, tools, &parsed.tool_calls, nullptr,
                        unfinished_reasoning_quote, partial);
-    else if (text_from_tools.starts_with(tokenization::QwenToolSyntax::kCallOpen))
+    else if (text_from_tools.starts_with(
+                 tokenization::QwenToolSyntax::kCallOpen))
       ParseQwenCalls(parsed.text, tools, &parsed.tool_calls, nullptr,
                      unfinished_reasoning_quote, partial);
     else
@@ -3358,11 +3359,10 @@ HttpResponse StreamingResponse(
                     if (!begin() || !filter.Push(piece.text))
                       return false;
                     if (filter.in_tools() && markers.size() <= 2 &&
-                        !tools.Update(StreamingGeneration(filter, request.chat,
-                                                          initial_output_state,
-                                                          markers, closers,
-                                                          format, quotes, false,
-                                                          true)
+                        !tools.Update(StreamingGeneration(
+                                          filter, request.chat,
+                                          initial_output_state, markers,
+                                          closers, format, quotes, false, true)
                                           .tool_calls))
                       return false;
                     if (pending_logprobs)
@@ -4160,11 +4160,11 @@ HttpResponse CreateCompatibilityResponse(
                       if (!begin() || !filter.Push(piece.text))
                         return false;
                       return !filter.in_tools() || markers.size() > 2 ||
-                             tools.Update(StreamingGeneration(
-                                              filter, chat, initial, markers,
-                                              closers, format, quotes, false,
-                                              true)
-                                              .tool_calls);
+                             tools.Update(
+                                 StreamingGeneration(filter, chat, initial,
+                                                     markers, closers, format,
+                                                     quotes, false, true)
+                                     .tool_calls);
                     },
                     on_progress, begin)
               : generation->Wait();

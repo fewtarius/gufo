@@ -12,8 +12,10 @@
 #include <hip/hip_runtime.h>
 
 #include "src/core/hip/hip_utils.hpp"
+#include "src/core/kv_codec/codec.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/ops.hpp"
+#include "src/families/qwen/kernels/ops/kv.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "tests/models/qwen/hip/support/device.hpp"
 #include "tests/models/qwen/hip/support/device_buffer.hpp"
@@ -25,6 +27,12 @@ namespace {
 using gufo::hip::QwenExecutionPolicy;
 using gufo::hip::QwenGpuArena;
 using gufo::hip::QwenKvCacheStorage;
+
+QwenExecutionPolicy Q8Policy() {
+  auto policy = QwenExecutionPolicy::Production();
+  policy.kv_cache_storage = QwenKvCacheStorage::kQ8_0;
+  return policy;
+}
 
 void Expect(bool condition, std::string_view message) {
   if (!condition) {
@@ -96,21 +104,23 @@ void TestCausalDecodeRows(unsigned kv_heads) {
         for (unsigned start : {0U, 17U, 120U, 124U, 127U, 128U, 504U, 508U,
                                511U, 512U, 8192U, 32768U, 65536U}) {
           float* const cache32 = fp16 ? nullptr : kv.data();
-          void* const cache16 = fp16 ? kv_half.data() : nullptr;
+          const gufo::hip::QwenCompactKv compact{
+              fp16 ? static_cast<void*>(kv_half.data()) : nullptr,
+              fp16 ? static_cast<void*>(kv_half.data()) : nullptr,
+              gufo::hip::QwenKvFormat::kFp16};
           for (unsigned row = 0; row < batch; ++row) {
-            gufo::hip::LaunchAttention(q.data() + row * width, nullptr, nullptr,
-                                       gated ? g.data() + row * width : nullptr,
-                                       cache32, cache32, cache16, cache16,
-                                       expected.data() + row * width, layer,
-                                       start + row, context, heads, kv_heads,
-                                       dim, nullptr, scratch.data(), true);
+            gufo::hip::LaunchAttention(
+                q.data() + row * width, nullptr, nullptr,
+                gated ? g.data() + row * width : nullptr, cache32, cache32,
+                compact, expected.data() + row * width, layer, start + row,
+                context, heads, kv_heads, dim, nullptr, scratch.data(), true);
           }
           const auto reference = expected.CopyToHost();
           for (auto capacity : {row_scratch, scratch.size()}) {
             gufo::hip::LaunchCausalDecodeAttention(
-                q.data(), gated ? g.data() : nullptr, cache32, cache32, cache16,
-                cache16, actual.data(), layer, start, batch, context, heads,
-                kv_heads, dim, nullptr, {scratch.data(), capacity});
+                q.data(), gated ? g.data() : nullptr, cache32, cache32, compact,
+                actual.data(), layer, start, batch, context, heads, kv_heads,
+                dim, nullptr, {scratch.data(), capacity});
             const auto result = actual.CopyToHost();
             Expect(std::memcmp(reference.data(), result.data(),
                                batch * width * sizeof(float)) == 0,
@@ -484,15 +494,18 @@ void TestOnlineAndGraphDecodeFp16Equivalence() {
     const std::size_t attention_offset =
         static_cast<std::size_t>(position) * attention_width;
     const std::size_t kv_offset = static_cast<std::size_t>(position) * kv_width;
+    gufo::hip::LaunchAttention(d_query + attention_offset, d_key + kv_offset,
+                               d_value + kv_offset, d_gate + attention_offset,
+                               d_fp32_cache, d_fp32_cache + cache_elements, {},
+                               d_fp32_out + attention_offset, 0, position,
+                               max_context, num_heads, num_kv_heads, head_dim);
     gufo::hip::LaunchAttention(
         d_query + attention_offset, d_key + kv_offset, d_value + kv_offset,
-        d_gate + attention_offset, d_fp32_cache, d_fp32_cache + cache_elements,
-        nullptr, nullptr, d_fp32_out + attention_offset, 0, position,
-        max_context, num_heads, num_kv_heads, head_dim);
-    gufo::hip::LaunchAttention(
-        d_query + attention_offset, d_key + kv_offset, d_value + kv_offset,
-        d_gate + attention_offset, nullptr, nullptr, d_fp16_cache,
-        static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+        d_gate + attention_offset, nullptr, nullptr,
+        gufo::hip::QwenCompactKv{
+            d_fp16_cache,
+            static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+            gufo::hip::QwenKvFormat::kFp16},
         d_fp16_out + attention_offset, 0, position, max_context, num_heads,
         num_kv_heads, head_dim);
   }
@@ -502,17 +515,19 @@ void TestOnlineAndGraphDecodeFp16Equivalence() {
                       hipMemcpyHostToDevice));
   const std::size_t graph_attention_offset = positions * attention_width;
   const std::size_t graph_kv_offset = positions * kv_width;
-  gufo::hip::LaunchAttention(d_query + graph_attention_offset,
-                             d_key + graph_kv_offset, d_value + graph_kv_offset,
-                             d_gate + graph_attention_offset, d_fp32_cache,
-                             d_fp32_cache + cache_elements, nullptr, nullptr,
-                             d_fp32_out + graph_attention_offset, 0, d_position,
-                             max_context, num_heads, num_kv_heads, head_dim);
+  gufo::hip::LaunchAttention(
+      d_query + graph_attention_offset, d_key + graph_kv_offset,
+      d_value + graph_kv_offset, d_gate + graph_attention_offset, d_fp32_cache,
+      d_fp32_cache + cache_elements, {}, d_fp32_out + graph_attention_offset, 0,
+      d_position, max_context, num_heads, num_kv_heads, head_dim);
   gufo::hip::LaunchAttention(
       d_query + graph_attention_offset, d_key + graph_kv_offset,
       d_value + graph_kv_offset, d_gate + graph_attention_offset, nullptr,
-      nullptr, d_fp16_cache,
-      static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+      nullptr,
+      gufo::hip::QwenCompactKv{
+          d_fp16_cache,
+          static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+          gufo::hip::QwenKvFormat::kFp16},
       d_fp16_out + graph_attention_offset, 0, d_position, max_context,
       num_heads, num_kv_heads, head_dim);
   HIP_CHECK(hipDeviceSynchronize());
@@ -602,26 +617,32 @@ void TestSplitKDecodeFp16Equivalence() {
 
   gufo::hip::LaunchBatchedFusedQKNormRoPEKvWrite(
       d_query, d_key, d_value, d_q_weight, d_k_weight, d_query, d_key,
-      d_fp32_cache, d_fp32_cache + cache_elements, d_fp16_cache,
-      static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements, 0, 0,
-      positions, max_context, num_heads, num_kv_heads, head_dim, rotary_dim,
-      1000000.0F);
+      d_fp32_cache, d_fp32_cache + cache_elements,
+      gufo::hip::QwenCompactKv{
+          d_fp16_cache,
+          static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+          gufo::hip::QwenKvFormat::kFp16},
+      0, 0, positions, max_context, num_heads, num_kv_heads, head_dim,
+      rotary_dim, 1000000.0F);
   const std::size_t final_attention_offset = (positions - 1U) * attention_width;
   const std::size_t final_kv_offset = (positions - 1U) * kv_width;
   gufo::hip::LaunchAttention(
       d_query + final_attention_offset, d_key + final_kv_offset,
       d_value + final_kv_offset, d_gate + final_attention_offset, d_fp32_cache,
-      d_fp32_cache + cache_elements, nullptr, nullptr, d_fp32_out, 0,
+      d_fp32_cache + cache_elements, {}, d_fp32_out, 0,
       static_cast<std::uint32_t>(positions - 1U), max_context, num_heads,
       num_kv_heads, head_dim, nullptr, d_fp32_scratch,
       /*skip_kv_write=*/true);
   gufo::hip::LaunchAttention(
       d_query + final_attention_offset, d_key + final_kv_offset,
       d_value + final_kv_offset, d_gate + final_attention_offset, nullptr,
-      nullptr, d_fp16_cache,
-      static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements, d_fp16_out, 0,
-      static_cast<std::uint32_t>(positions - 1U), max_context, num_heads,
-      num_kv_heads, head_dim, nullptr, d_fp16_scratch,
+      nullptr,
+      gufo::hip::QwenCompactKv{
+          d_fp16_cache,
+          static_cast<std::uint16_t*>(d_fp16_cache) + cache_elements,
+          gufo::hip::QwenKvFormat::kFp16},
+      d_fp16_out, 0, static_cast<std::uint32_t>(positions - 1U), max_context,
+      num_heads, num_kv_heads, head_dim, nullptr, d_fp16_scratch,
       /*skip_kv_write=*/true);
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -655,6 +676,182 @@ void TestSplitKDecodeFp16Equivalence() {
   HIP_CHECK(hipFree(d_fp16_scratch));
 }
 
+// The device encoder is the host codec's device half. The two must agree
+// byte for byte: the same binary16 scale, the same 32 codes and the same
+// tie-breaking. A difference in any of those shows up as a lossy cache that
+// drifts further from FP16 than q8_0 can explain.
+void TestQ8KvCodecParity() {
+  using gufo::test::DeviceBuffer;
+  constexpr std::uint32_t kv_width = 512;
+  constexpr std::uint32_t rows = 3;
+  constexpr std::uint32_t max_context = 8;
+  constexpr std::uint32_t layer = 2;
+
+  std::vector<float> source(rows * kv_width);
+  for (std::size_t i = 0; i < source.size(); ++i) {
+    // A spread of magnitudes exercises the scale, the codes and the ties.
+    source[i] = 0.375F * std::sin(static_cast<float>(i) * 0.017F) *
+                (1.0F + static_cast<float>(i % 7));
+  }
+  const std::size_t row_bytes = gufo::core::kv_codec::RowBytes(
+      kv_width, gufo::core::kv_codec::RowCodec::kQ8_0);
+  // The canonical plane is token-major over the whole context, so the
+  // layer's rows start after the earlier layers' rows.
+  const std::size_t plane_rows = (layer * max_context) + rows;
+  DeviceBuffer<float> d_source(source);
+  DeviceBuffer<unsigned char> device(plane_rows * row_bytes * 2);
+  gufo::hip::LaunchEncodeQ8KvRows(
+      d_source.data(), d_source.data(), device.data(),
+      device.data() + (plane_rows * row_bytes), layer, 0, rows, max_context,
+      kv_width, nullptr);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  const auto encoded = device.CopyToHost();
+  for (std::uint32_t row = 0; row < rows; ++row) {
+    const std::span<const float> row_values(source.data() + row * kv_width,
+                                            kv_width);
+    std::vector<std::byte> expected(row_bytes);
+    gufo::core::kv_codec::EncodeRow(
+        row_values, gufo::core::kv_codec::RowCodec::kQ8_0, expected);
+    const auto* actual =
+        encoded.data() + ((layer * max_context + row) * row_bytes);
+    for (std::size_t i = 0; i < row_bytes; ++i) {
+      Expect(actual[i] == static_cast<unsigned char>(expected[i]),
+             "the device q8_0 encoder disagrees with the host codec");
+    }
+  }
+  std::cout << "q8_0 device encoder matches the host codec byte for byte\n";
+}
+
+// The q8_0 cache must decode to the same attention output as the FP16 cache
+// to within the format's own precision. A larger difference means the read
+// path addresses the wrong blocks, not that the format is lossy.
+void TestQ8AttentionMatchesFp16() {
+  using gufo::test::DeviceBuffer;
+  constexpr std::uint32_t kv_width = 512;
+  constexpr std::uint32_t num_heads = 16;
+  constexpr std::uint32_t num_kv_heads = 2;
+  constexpr std::uint32_t head_dim = 256;
+  constexpr std::uint32_t positions = 64;
+  constexpr std::uint32_t max_context = 128;
+  constexpr std::uint32_t layer = 1;
+
+  std::vector<float> key(positions * kv_width);
+  std::vector<float> value(positions * kv_width);
+  std::vector<float> query(num_heads * head_dim);
+  for (std::size_t i = 0; i < key.size(); ++i) {
+    key[i] = 0.5F * std::sin(static_cast<float>(i) * 0.013F);
+    value[i] = 0.5F * std::cos(static_cast<float>(i) * 0.021F);
+  }
+  for (std::size_t i = 0; i < query.size(); ++i) {
+    query[i] = 0.25F * std::sin(static_cast<float>(i) * 0.031F);
+  }
+  const std::size_t row_bytes = gufo::core::kv_codec::RowBytes(
+      kv_width, gufo::core::kv_codec::RowCodec::kQ8_0);
+  const std::size_t plane_rows = (layer * max_context) + positions;
+  DeviceBuffer<float> d_key(key), d_value(value), d_query(query);
+  DeviceBuffer<unsigned char> d_q8(plane_rows * row_bytes * 2);
+  DeviceBuffer<__half> d_fp16(plane_rows * kv_width * 2);
+  DeviceBuffer<float> d_fp16_out(query.size()), d_q8_out(query.size());
+
+  // The FP16 planes hold the same rows in the canonical token-major order:
+  // the K rows first, the V rows after them.
+  {
+    std::vector<__half> half(plane_rows * kv_width * 2, __float2half(0.0F));
+    for (std::uint32_t row = 0; row < positions; ++row) {
+      const std::size_t base = (layer * max_context + row) * kv_width;
+      for (std::uint32_t element = 0; element < kv_width; ++element) {
+        half[base + element] = __float2half(key[row * kv_width + element]);
+        half[plane_rows * kv_width + base + element] =
+            __float2half(value[row * kv_width + element]);
+      }
+    }
+    d_fp16.CopyFrom(half);
+  }
+  gufo::hip::LaunchEncodeQ8KvRows(d_key.data(), d_value.data(), d_q8.data(),
+                                  d_q8.data() + (plane_rows * row_bytes), layer,
+                                  0, positions, max_context, kv_width, nullptr);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  const gufo::hip::QwenCompactKv fp16_cache{
+      d_fp16.data(), d_fp16.data() + (plane_rows * kv_width),
+      gufo::hip::QwenKvFormat::kFp16};
+  const gufo::hip::QwenCompactKv q8_cache{
+      d_q8.data(), d_q8.data() + (plane_rows * row_bytes),
+      gufo::hip::QwenKvFormat::kQ8_0};
+  gufo::hip::LaunchAttention(
+      d_query.data(), d_key.data(), d_value.data(), nullptr, nullptr, nullptr,
+      fp16_cache, d_fp16_out.data(), layer, positions - 1, max_context,
+      num_heads, num_kv_heads, head_dim, nullptr, nullptr,
+      /*skip_kv_write=*/true);
+  HIP_CHECK(hipDeviceSynchronize());
+  gufo::hip::LaunchAttention(
+      d_query.data(), d_key.data(), d_value.data(), nullptr, nullptr, nullptr,
+      q8_cache, d_q8_out.data(), layer, positions - 1, max_context, num_heads,
+      num_kv_heads, head_dim, nullptr, nullptr, /*skip_kv_write=*/true);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  const auto fp16 = d_fp16_out.CopyToHost();
+  const auto q8 = d_q8_out.CopyToHost();
+  float max_diff = 0.0F;
+  float max_value = 0.0F;
+  for (std::size_t i = 0; i < fp16.size(); ++i) {
+    Expect(std::isfinite(q8[i]),
+           "the q8_0 attention produced a non-finite result");
+    max_diff = std::max(max_diff, std::abs(fp16[i] - q8[i]));
+    max_value = std::max(max_value, std::abs(fp16[i]));
+  }
+  std::cout << "q8_0 decode max FP16 diff: " << max_diff
+            << " (output magnitude " << max_value << ")\n";
+  Expect(max_diff < 2e-2F * std::max(1.0F, max_value),
+         "the q8_0 attention drifted further from FP16 than the format allows");
+
+  // The read path is exact when it is compared against the FP16 plane that
+  // holds the dequantized q8_0 values. Any difference here is a read that
+  // addresses the wrong block, not the format's own loss.
+  const auto encoded = d_q8.CopyToHost();
+  std::vector<__half> dequantized(plane_rows * kv_width * 2,
+                                  __float2half(0.0F));
+  for (std::uint32_t row = 0; row < positions; ++row) {
+    const std::size_t base = (layer * max_context + row) * kv_width;
+    for (std::size_t plane = 0; plane < 2; ++plane) {
+      const std::size_t plane_base = plane * plane_rows * kv_width;
+      const std::size_t block_base = plane * plane_rows * row_bytes +
+                                     (layer * max_context + row) * row_bytes;
+      for (std::uint32_t block = 0; block < kv_width / 32; ++block) {
+        std::vector<float> values(32);
+        std::vector<std::byte> raw(34);
+        std::memcpy(raw.data(), encoded.data() + block_base + block * 34, 34);
+        gufo::core::kv_codec::DecodeRow(
+            raw, gufo::core::kv_codec::RowCodec::kQ8_0, values);
+        for (std::uint32_t i = 0; i < 32; ++i) {
+          dequantized[plane_base + base + block * 32 + i] =
+              __float2half(values[i]);
+        }
+      }
+    }
+  }
+  DeviceBuffer<__half> d_dequantized(dequantized);
+  DeviceBuffer<float> d_dequantized_out(query.size());
+  gufo::hip::LaunchAttention(
+      d_query.data(), d_key.data(), d_value.data(), nullptr, nullptr, nullptr,
+      gufo::hip::QwenCompactKv{d_dequantized.data(),
+                               d_dequantized.data() + (plane_rows * kv_width),
+                               gufo::hip::QwenKvFormat::kFp16},
+      d_dequantized_out.data(), layer, positions - 1, max_context, num_heads,
+      num_kv_heads, head_dim, nullptr, nullptr, /*skip_kv_write=*/true);
+  HIP_CHECK(hipDeviceSynchronize());
+  const auto reference = d_dequantized_out.CopyToHost();
+  float read_diff = 0.0F;
+  for (std::size_t i = 0; i < reference.size(); ++i) {
+    read_diff = std::max(read_diff, std::abs(reference[i] - q8[i]));
+  }
+  std::cout << "q8_0 read path max diff against the dequantized FP16 plane: "
+            << read_diff << '\n';
+  Expect(read_diff < 1e-3F * std::max(1.0F, max_value),
+         "the q8_0 read path does not reproduce the dequantized values");
+}
+
 }  // namespace
 #endif  // defined(ENGINE_ENABLE_HIP)
 
@@ -675,7 +872,9 @@ int main() {
   TestCompactImageLayout();
   TestOnlineAndGraphDecodeFp16Equivalence();
   TestSplitKDecodeFp16Equivalence();
-  std::cout << "Qwen FP16 KV storage tests passed.\n";
+  TestQ8KvCodecParity();
+  TestQ8AttentionMatchesFp16();
+  std::cout << "Qwen KV storage tests passed.\n";
 #endif
   return 0;
 }

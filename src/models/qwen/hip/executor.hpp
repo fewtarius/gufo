@@ -168,6 +168,7 @@ private:
 
   void* d_kv_f32_{nullptr};
   void* d_kv_f16_{nullptr};
+  void* d_kv_q8_{nullptr};
   void* d_ssm_conv_{nullptr};
   void* d_ssm_deltanet_{nullptr};
   std::size_t kv_elements_per_plane_{0};
@@ -229,6 +230,24 @@ struct QwenFfnScratch {
   std::span<float> out;
 };
 
+/// Device scratch of the mixture-of-experts feed-forward.
+///
+/// Every span is [rows] wide, so the same scratch serves one decode token
+/// and a batch of verification rows. The router logits and the shared
+/// expert's gate are per row; the routed experts own one activation row
+/// and one output row per selected expert.
+struct QwenMoeScratch {
+  std::span<float> router_logits;
+  std::span<float> shared_logit;
+  std::span<std::int32_t> ids;
+  std::span<float> weights;
+  std::span<float> shared_weight;
+  std::span<float> act;
+  std::span<float> down_out;
+  std::span<float> shared_act;
+  std::span<float> shared_out;
+};
+
 /// Typed non-owning capability views over stable Qwen GPU arena allocations.
 /// The nested aggregates carry element counts without owning memory or changing
 /// any address used by kernels or graph capture.
@@ -237,12 +256,14 @@ struct QwenGpuScratchView {
   QwenAttentionScratch attention;
   QwenSsmScratch ssm;
   QwenFfnScratch ffn;
+  QwenMoeScratch moe;
 };
 
 static_assert(std::is_trivially_copyable_v<QwenDecodeScratch>);
 static_assert(std::is_trivially_copyable_v<QwenAttentionScratch>);
 static_assert(std::is_trivially_copyable_v<QwenSsmScratch>);
 static_assert(std::is_trivially_copyable_v<QwenFfnScratch>);
+static_assert(std::is_trivially_copyable_v<QwenMoeScratch>);
 static_assert(std::is_trivially_copyable_v<QwenGpuScratchView>);
 static_assert(std::is_same_v<decltype(QwenDecodeScratch::sampled_token),
                              std::span<std::uint32_t>>);
@@ -323,6 +344,9 @@ public:
   float* d_ssm_alpha_beta{nullptr};
   float* d_logits{nullptr};
   void* d_attention_kv_f16{nullptr};
+  // The q8_0 K/V cache. One binary16 scale and 32 signed codes per 32
+  // values, token-major like the FP16 plane. See docs/kv-codec.md.
+  void* d_attention_kv_q8{nullptr};
   float* d_kv_cache{nullptr};
   // Mirrors of the live recurrent buffers (see BeginRecurrentWrite); reassigned
   // whenever the live buffer changes, so snapshots and resets read and write
@@ -339,6 +363,13 @@ public:
   float* d_split_k_attention{nullptr};
   hip_bfloat16* d_weights_bf16{nullptr};
   void* d_scratch_q8_act{nullptr};
+  // The mixture-of-experts feed-forward scratch, split into spans by
+  // GetScratchView. Null for a dense model.
+  void* d_moe_buf{nullptr};
+
+  /// The row count the mixture-of-experts scratch is sized for. One decode
+  /// token uses one row; a batch of verification rows uses one each.
+  static constexpr std::uint32_t kMoeScratchRows = 64;
 
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;
@@ -350,6 +381,32 @@ public:
     // Qwen27B reaches 2^32 elements per plane at context 262144.
     return static_cast<std::size_t>(config_.FullAttentionLayerCount()) *
            config_.num_key_value_heads * max_context_ * config_.head_dim;
+  }
+  /// The canonical K/V planes and the format they are stored in.
+  ///
+  /// The FP32 reference plane is a separate allocation and is not part of
+  /// this; the canonical plane holds the K rows first and the V rows after
+  /// them.
+  [[nodiscard]] QwenCompactKv CompactKv() const noexcept {
+    void* base = nullptr;
+    if (policy_.UsesFp16AttentionKv()) {
+      base = d_attention_kv_f16;
+    } else if (policy_.UsesQ8AttentionKv()) {
+      base = d_attention_kv_q8;
+    }
+    if (base == nullptr) {
+      return {};
+    }
+    const std::size_t plane_bytes =
+        QwenKvRowBytes(policy_.kv_cache_storage,
+                       config_.num_key_value_heads * config_.head_dim) *
+        static_cast<std::size_t>(max_context_) *
+        config_.FullAttentionLayerCount();
+    return {
+        .k = base,
+        .v = static_cast<std::byte*>(base) + plane_bytes,
+        .format = QwenKvFormatFor(policy_.kv_cache_storage),
+    };
   }
   [[nodiscard]] QwenRecurrentStateStorage GetRecurrentStateStorage()
       const noexcept {
@@ -369,6 +426,9 @@ public:
   void RestoreSnapshot(const QwenGpuSnapshot& snapshot);
   void RestoreCompactSnapshot(std::span<const std::uint8_t> payload,
                               std::uint32_t expected_valid_context);
+  /// The mixture-of-experts scratch, split out of the arena's single
+  /// allocation. Empty for a dense model.
+  [[nodiscard]] QwenMoeScratch MoeScratchView() noexcept;
   [[nodiscard]] QwenGpuScratchView GetScratchView(
       std::size_t batch_size = 1) noexcept;
   void SetTargetLayerCapture(std::span<const std::uint32_t> target_layer_ids);
@@ -653,6 +713,10 @@ private:
   std::optional<tokenization::TokenId> next_token_;
   bool capture_prompt_hidden_{false};
   bool replaying_ssm_state_{false};
+  /// The mixture-of-experts kernels have been warmed once outside the graph
+  /// capture, so the matrix library's workspace pool is sized before the
+  /// decode graph is captured.
+  bool moe_warmed_{false};
 };
 
 }  // namespace gufo::hip

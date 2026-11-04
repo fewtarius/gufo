@@ -310,17 +310,13 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardTokenBatch(
         const bool use_split_k = detail::IsSplitKDecodeAttentionSupported(
             static_cast<std::size_t>(position) + 1, config.num_attention_heads,
             config.num_key_value_heads, config.head_dim);
-        LaunchAttention(
-            query, key, value, gate, state_arena.d_kv_cache,
-            OffsetIfPresent(state_arena.d_kv_cache, total_k),
-            state_arena.d_attention_kv_f16,
-            OffsetIfPresent(
-                static_cast<std::uint16_t*>(state_arena.d_attention_kv_f16),
-                total_k),
-            context, attention_layer, position, state_arena.GetMaxContext(),
-            config.num_attention_heads, config.num_key_value_heads,
-            config.head_dim, arena.stream,
-            use_split_k ? arena.d_split_k_attention : nullptr);
+        LaunchAttention(query, key, value, gate, state_arena.d_kv_cache,
+                        OffsetIfPresent(state_arena.d_kv_cache, total_k),
+                        state_arena.CompactKv(), context, attention_layer,
+                        position, state_arena.GetMaxContext(),
+                        config.num_attention_heads, config.num_key_value_heads,
+                        config.head_dim, arena.stream,
+                        use_split_k ? arena.d_split_k_attention : nullptr);
       }
       LaunchProjection(layer.attn_output, scratch.ssm.out.data(),
                        scratch.attention.output.data(), batch_size, hidden_size,
@@ -663,15 +659,11 @@ QwenGpuExecutor::ForwardVerificationBatch(
               (scratch.attention.k.data() + offset * kv_size),
               state_arena.d_kv_cache,
               OffsetIfPresent(state_arena.d_kv_cache, total_k),
-              state_arena.d_attention_kv_f16,
-              OffsetIfPresent(
-                  static_cast<std::uint16_t*>(state_arena.d_attention_kv_f16),
-                  total_k),
-              attention_layer, start_pos, sequence_size,
-              state_arena.GetMaxContext(), config.num_attention_heads,
-              config.num_key_value_heads, config.head_dim, config.rotary_dim,
-              config.rope_theta, 1e-6F, arena_.stream,
-              item.executor->vision_input_.rope());
+              state_arena.CompactKv(), attention_layer, start_pos,
+              sequence_size, state_arena.GetMaxContext(),
+              config.num_attention_heads, config.num_key_value_heads,
+              config.head_dim, config.rotary_dim, config.rope_theta, 1e-6F,
+              arena_.stream, item.executor->vision_input_.rope());
           // Exact verification projections do not use weight dequantization
           // scratch. Reuse it for independent split-K rows without allocating
           // another buffer or changing the scalar decode workspace.
@@ -687,10 +679,7 @@ QwenGpuExecutor::ForwardVerificationBatch(
               (scratch.ssm.gate.data() + offset * attention_size),
               state_arena.d_kv_cache,
               OffsetIfPresent(state_arena.d_kv_cache, total_k),
-              state_arena.d_attention_kv_f16,
-              OffsetIfPresent(
-                  static_cast<std::uint16_t*>(state_arena.d_attention_kv_f16),
-                  total_k),
+              state_arena.CompactKv(),
               (scratch.ssm.out.data() + offset * attention_size),
               attention_layer, start_pos, sequence_size,
               state_arena.GetMaxContext(), config.num_attention_heads,
@@ -715,10 +704,7 @@ QwenGpuExecutor::ForwardVerificationBatch(
                     row * attention_size,
                 state_arena.d_kv_cache,
                 OffsetIfPresent(state_arena.d_kv_cache, total_k),
-                state_arena.d_attention_kv_f16,
-                OffsetIfPresent(
-                    static_cast<std::uint16_t*>(state_arena.d_attention_kv_f16),
-                    total_k),
+                state_arena.CompactKv(),
                 (scratch.ssm.out.data() + offset * attention_size) +
                     row * attention_size,
                 attention_layer, position, state_arena.GetMaxContext(),

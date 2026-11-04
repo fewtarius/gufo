@@ -7,6 +7,7 @@
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/ops.hpp"
 #include "src/models/qwen/hip/executor.hpp"
+#include "src/models/qwen/hip/moe_ffn.hpp"
 #include "src/models/qwen/modules/modules.hpp"
 
 namespace gufo::hip {
@@ -119,10 +120,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
             static_cast<const float*>(layer.attn_k_norm.data),
             attention_scratch.q.data(), attention_scratch.k.data(),
             arena.d_kv_cache, OffsetIfPresent(arena.d_kv_cache, total_k),
-            arena.d_attention_kv_f16,
-            OffsetIfPresent(
-                static_cast<std::uint16_t*>(arena.d_attention_kv_f16), total_k),
-            attn_layer_idx, d_in_pos, arena.GetMaxContext(),
+            arena.CompactKv(), attn_layer_idx, d_in_pos, arena.GetMaxContext(),
             config.num_attention_heads, config.num_key_value_heads,
             config.head_dim, config.rotary_dim, config.rope_theta, 1e-6F,
             arena.stream, rope);
@@ -155,25 +153,19 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
             attention_scratch.q.data(), attention_scratch.k.data(),
             attention_scratch.v.data(), ssm_scratch.gate.data(),
             arena.d_kv_cache, OffsetIfPresent(arena.d_kv_cache, total_k),
-            arena.d_attention_kv_f16,
-            OffsetIfPresent(
-                static_cast<std::uint16_t*>(arena.d_attention_kv_f16), total_k),
-            ssm_scratch.out.data(), attn_layer_idx, pos, arena.GetMaxContext(),
-            config.num_attention_heads, config.num_key_value_heads,
-            config.head_dim, arena.stream, attention_scratch.split_k.data(),
-            fused_qknorm_rope_kv);
-      } else {
-        LaunchAttention(
-            attention_scratch.q.data(), attention_scratch.k.data(),
-            attention_scratch.v.data(), ssm_scratch.gate.data(),
-            arena.d_kv_cache, OffsetIfPresent(arena.d_kv_cache, total_k),
-            arena.d_attention_kv_f16,
-            OffsetIfPresent(
-                static_cast<std::uint16_t*>(arena.d_attention_kv_f16), total_k),
-            ssm_scratch.out.data(), attn_layer_idx, d_in_pos,
+            arena.CompactKv(), ssm_scratch.out.data(), attn_layer_idx, pos,
             arena.GetMaxContext(), config.num_attention_heads,
             config.num_key_value_heads, config.head_dim, arena.stream,
-            fused_qknorm_rope_kv);
+            attention_scratch.split_k.data(), fused_qknorm_rope_kv);
+      } else {
+        LaunchAttention(attention_scratch.q.data(), attention_scratch.k.data(),
+                        attention_scratch.v.data(), ssm_scratch.gate.data(),
+                        arena.d_kv_cache,
+                        OffsetIfPresent(arena.d_kv_cache, total_k),
+                        arena.CompactKv(), ssm_scratch.out.data(),
+                        attn_layer_idx, d_in_pos, arena.GetMaxContext(),
+                        config.num_attention_heads, config.num_key_value_heads,
+                        config.head_dim, arena.stream, fused_qknorm_rope_kv);
       }
 
       // Output projection, routed through the quant_gemm module (HIP
@@ -230,10 +222,17 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       // same down GEMV as the former inline calls; behavior identical. The
       // module reads the arena device spans (x = d_normed, act_scratch =
       // d_ffn_act, out = d_ffn_out) directly.
-      const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
-      gufo::models::qwen::FfnForward(
-          module_ctx, ffn_view, decode_scratch.normed, ffn_scratch.activation,
-          ffn_scratch.activation, ffn_scratch.activation, ffn_scratch.out);
+      if (config.IsMoe()) {
+        // A routed feed-forward: the router picks the experts on the device
+        // and their outputs are combined with the shared expert's.
+        MoeFfnToken(layer, config, scratch.moe, 0, decode_scratch.normed.data(),
+                    ffn_scratch.out.data(), arena.stream);
+      } else {
+        const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
+        gufo::models::qwen::FfnForward(
+            module_ctx, ffn_view, decode_scratch.normed, ffn_scratch.activation,
+            ffn_scratch.activation, ffn_scratch.activation, ffn_scratch.out);
+      }
     }
 
     // Residual Add

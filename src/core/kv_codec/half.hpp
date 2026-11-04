@@ -57,7 +57,8 @@ namespace gufo::core::kv_codec {
   }
   auto magnitude = ((exponent - 112U) << 10) | (fraction >> 13);
   const auto remainder = fraction & 0x1fffU;
-  magnitude += remainder > 0x1000U || (remainder == 0x1000U && (magnitude & 1U));
+  magnitude +=
+      remainder > 0x1000U || (remainder == 0x1000U && (magnitude & 1U));
   return sign | static_cast<std::uint16_t>(magnitude);
 }
 

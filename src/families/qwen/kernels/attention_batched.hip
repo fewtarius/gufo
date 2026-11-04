@@ -12,8 +12,10 @@
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
+#include "src/families/qwen/kernels/kv_read.hpp"
 #include "src/families/qwen/kernels/ops/attention.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
+#include "src/families/qwen/kernels/ops/kv.hpp"
 
 namespace gufo::hip {
 
@@ -65,18 +67,12 @@ __global__ void WriteBatchedKVCacheKernel(
   }
 }
 
-__device__ __forceinline__ float4 LoadBatchedHalf4(const __half* source) {
-  const auto* pairs = reinterpret_cast<const __half2*>(source);
-  const float2 lower = __half22float2(pairs[0]);
-  const float2 upper = __half22float2(pairs[1]);
-  return make_float4(lower.x, lower.y, upper.x, upper.y);
-}
-
+template<QwenKvFormat Format>
 __global__ void BatchedAttentionKernel(
     const float* __restrict__ q, const float* __restrict__ gate,
     const float* __restrict__ k_cache, const float* __restrict__ v_cache,
-    const __half* __restrict__ k_cache_f16,
-    const __half* __restrict__ v_cache_f16, float* __restrict__ out_context,
+    const void* __restrict__ k_cache_compact,
+    const void* __restrict__ v_cache_compact, float* __restrict__ out_context,
     hip_bfloat16* __restrict__ out_context_bf16, std::uint32_t layer_idx,
     std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
     std::uint32_t num_heads, std::uint32_t num_kv_heads,
@@ -90,7 +86,7 @@ __global__ void BatchedAttentionKernel(
   const std::size_t tid = threadIdx.x;
   const std::uint32_t kv_h = h / (num_heads / num_kv_heads);
   const float scale = 1.0F / sqrtf(static_cast<float>(head_dim));
-  const bool use_f16_cache = k_cache == nullptr;
+  const bool use_compact_cache = k_cache == nullptr;
   const std::size_t kv_width =
       static_cast<std::size_t>(num_kv_heads) * head_dim;
 
@@ -119,16 +115,18 @@ __global__ void BatchedAttentionKernel(
           ((static_cast<std::size_t>(layer_idx) * max_context + p) * kv_width) +
           (static_cast<std::size_t>(kv_h) * head_dim);
       const auto* k_p_vec =
-          use_f16_cache ? nullptr
-                        : reinterpret_cast<const float4*>(k_cache + p_offset);
-      const __half* k_p_f16 =
-          use_f16_cache ? k_cache_f16 + p_offset_f16 : nullptr;
+          use_compact_cache ? nullptr
+                            : reinterpret_cast<const float4*>(k_cache + p_offset);
+      const auto k_p_compact =
+          use_compact_cache
+              ? detail::KvPlaneAt<Format>(k_cache_compact, p_offset_f16)
+              : detail::KvElements<Format>{};
 
       float dot = 0.0F;
       for (std::size_t d = lane_id; d < num_vec; d += 32) {
         const float4 qv = q_h_vec[d];
-        const float4 kv =
-            use_f16_cache ? LoadBatchedHalf4(k_p_f16 + (d * 4)) : k_p_vec[d];
+        const float4 kv = use_compact_cache ? k_p_compact.Load4(d * 4)
+                                            : k_p_vec[d];
         dot += (qv.x * kv.x) + (qv.y * kv.y) + (qv.z * kv.z) + (qv.w * kv.w);
       }
       for (int offset = 16; offset > 0; offset >>= 1) {
@@ -149,16 +147,18 @@ __global__ void BatchedAttentionKernel(
           ((static_cast<std::size_t>(layer_idx) * max_context + p) * kv_width) +
           (static_cast<std::size_t>(kv_h) * head_dim);
       const auto* k_p_vec =
-          use_f16_cache ? nullptr
-                        : reinterpret_cast<const float4*>(k_cache + p_offset);
-      const __half* k_p_f16 =
-          use_f16_cache ? k_cache_f16 + p_offset_f16 : nullptr;
+          use_compact_cache ? nullptr
+                            : reinterpret_cast<const float4*>(k_cache + p_offset);
+      const auto k_p_compact =
+          use_compact_cache
+              ? detail::KvPlaneAt<Format>(k_cache_compact, p_offset_f16)
+              : detail::KvElements<Format>{};
 
       float dot = 0.0F;
       for (std::size_t d = 0; d < num_vec; ++d) {
         const float4 qv = q_h_vec[d];
-        const float4 kv =
-            use_f16_cache ? LoadBatchedHalf4(k_p_f16 + (d * 4)) : k_p_vec[d];
+        const float4 kv = use_compact_cache ? k_p_compact.Load4(d * 4)
+                                            : k_p_vec[d];
         dot += (qv.x * kv.x) + (qv.y * kv.y) + (qv.z * kv.z) + (qv.w * kv.w);
       }
       s_scores[p] = dot * scale;
@@ -213,12 +213,14 @@ __global__ void BatchedAttentionKernel(
                 max_context +
             p) *
            head_dim);
-      if (use_f16_cache) {
+      if (use_compact_cache) {
         const std::size_t p_offset_f16 =
             ((static_cast<std::size_t>(layer_idx) * max_context + p) *
              kv_width) +
             (static_cast<std::size_t>(kv_h) * head_dim);
-        ctx += s_scores[p] * __half2float(v_cache_f16[p_offset_f16 + tid]);
+        const auto v_p_compact =
+            detail::KvPlaneAt<Format>(v_cache_compact, p_offset_f16);
+        ctx += s_scores[p] * v_p_compact.Load(tid);
       } else {
         ctx += s_scores[p] * v_cache[p_offset + tid];
       }
@@ -243,13 +245,12 @@ __global__ void BatchedAttentionKernel(
 
 void LaunchBatchedAttention(const float* q, const float* k, const float* v,
                             const float* gate, float* k_cache, float* v_cache,
-                            void* k_cache_f16, void* v_cache_f16,
-                            float* out_context, std::uint32_t layer_idx,
-                            std::uint32_t start_pos, std::size_t batch_size,
-                            std::uint32_t max_context, std::uint32_t num_heads,
-                            std::uint32_t num_kv_heads, std::uint32_t head_dim,
-                            hipStream_t stream, bool skip_kv_write,
-                            void* out_context_bf16) {
+                            QwenCompactKv compact, float* out_context,
+                            std::uint32_t layer_idx, std::uint32_t start_pos,
+                            std::size_t batch_size, std::uint32_t max_context,
+                            std::uint32_t num_heads, std::uint32_t num_kv_heads,
+                            std::uint32_t head_dim, hipStream_t stream,
+                            bool skip_kv_write, void* out_context_bf16) {
   const std::size_t max_seq_len =
       static_cast<std::size_t>(start_pos) + batch_size;
   const bool online = !detail::BatchedAttentionScoresFitLds(max_seq_len);
@@ -259,19 +260,29 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
         "long batched attention requires 256-element GQA heads");
   const dim3 kv_grid(num_kv_heads, static_cast<unsigned int>(batch_size));
   if (!skip_kv_write) {
-    WriteBatchedKVCacheKernel<<<kv_grid, 256, 0, stream>>>(
-        k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
-        static_cast<__half*>(v_cache_f16), layer_idx, start_pos, batch_size,
-        max_context, num_kv_heads, head_dim);
+    if (compact.format == QwenKvFormat::kQ8_0) {
+      LaunchEncodeQ8KvRows(k, v, compact.k, compact.v, layer_idx, start_pos,
+                           static_cast<std::uint32_t>(batch_size), max_context,
+                           num_kv_heads * head_dim, stream);
+    } else {
+      // The binary16 plane only exists for the FP16 format. The q8_0 plane
+      // is written by the encoder above.
+      const bool binary16_plane = compact.format == QwenKvFormat::kFp16;
+      WriteBatchedKVCacheKernel<<<kv_grid, 256, 0, stream>>>(
+          k, v, k_cache, v_cache,
+          binary16_plane ? static_cast<__half*>(compact.k) : nullptr,
+          binary16_plane ? static_cast<__half*>(compact.v) : nullptr, layer_idx,
+          start_pos, batch_size, max_context, num_kv_heads, head_dim);
+    }
   }
 
   if (online) {
-    // The FP32 reference layout cannot use the FP16 tiled kernels. Reuse
+    // The FP32 reference layout cannot use the compact tiled kernels. Reuse
     // scalar online arithmetic without context-sized LDS or new scratch.
-    LaunchCausalDecodeAttention(q, gate, k_cache, v_cache, k_cache_f16,
-                                v_cache_f16, out_context, layer_idx, start_pos,
-                                batch_size, max_context, num_heads,
-                                num_kv_heads, head_dim, stream);
+    LaunchCausalDecodeAttention(q, gate, k_cache, v_cache, compact,
+                                out_context, layer_idx, start_pos, batch_size,
+                                max_context, num_heads, num_kv_heads, head_dim,
+                                stream);
     if (out_context_bf16 != nullptr)
       LaunchFloatToBfloat16(out_context, out_context_bf16,
                             batch_size * num_heads * head_dim, stream);
@@ -279,11 +290,19 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
   }
   const dim3 attn_grid(num_heads, static_cast<unsigned int>(batch_size));
   const std::size_t shared_scores_bytes = max_seq_len * sizeof(float);
-  BatchedAttentionKernel<<<attn_grid, 256, shared_scores_bytes, stream>>>(
-      q, gate, k_cache, v_cache, static_cast<const __half*>(k_cache_f16),
-      static_cast<const __half*>(v_cache_f16), out_context,
-      static_cast<hip_bfloat16*>(out_context_bf16), layer_idx, start_pos,
-      batch_size, max_context, num_heads, num_kv_heads, head_dim);
+  if (compact.format == QwenKvFormat::kQ8_0) {
+    BatchedAttentionKernel<QwenKvFormat::kQ8_0>
+        <<<attn_grid, 256, shared_scores_bytes, stream>>>(
+            q, gate, k_cache, v_cache, compact.k, compact.v, out_context,
+            static_cast<hip_bfloat16*>(out_context_bf16), layer_idx, start_pos,
+            batch_size, max_context, num_heads, num_kv_heads, head_dim);
+  } else {
+    BatchedAttentionKernel<QwenKvFormat::kFp16>
+        <<<attn_grid, 256, shared_scores_bytes, stream>>>(
+            q, gate, k_cache, v_cache, compact.k, compact.v, out_context,
+            static_cast<hip_bfloat16*>(out_context_bf16), layer_idx, start_pos,
+            batch_size, max_context, num_heads, num_kv_heads, head_dim);
+  }
 }
 
 __global__ void CausalSoftmaxKernel(float* __restrict__ scores,
@@ -354,13 +373,17 @@ __global__ void ApplyAttentionGateKernel(const float* __restrict__ gate,
 
 void LaunchBatchedAttentionGemm(
     hipblasHandle_t handle, const float* q, const float* k, const float* v,
-    const float* gate, float* k_cache, float* v_cache, void* k_cache_f16,
-    void* v_cache_f16, float* scores, float* out_context,
-    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim, hipStream_t stream) {
+    const float* gate, float* k_cache, float* v_cache, QwenCompactKv compact,
+    float* scores, float* out_context, std::uint32_t layer_idx,
+    std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    hipStream_t stream) {
   if (batch_size == 0) {
     return;
+  }
+  if (compact.format != QwenKvFormat::kFp16) {
+    throw std::invalid_argument(
+        "the GEMM batched attention reads the FP32 reference cache");
   }
   const std::size_t sequence_length =
       static_cast<std::size_t>(start_pos) + batch_size;
@@ -373,8 +396,8 @@ void LaunchBatchedAttentionGemm(
 
   const dim3 kv_grid(num_kv_heads, static_cast<unsigned int>(batch_size));
   WriteBatchedKVCacheKernel<<<kv_grid, 256, 0, stream>>>(
-      k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
-      static_cast<__half*>(v_cache_f16), layer_idx, start_pos, batch_size,
+      k, v, k_cache, v_cache, static_cast<__half*>(compact.k),
+      static_cast<__half*>(compact.v), layer_idx, start_pos, batch_size,
       max_context, num_kv_heads, head_dim);
 
   const float attention_scale = 1.0F / sqrtf(static_cast<float>(head_dim));

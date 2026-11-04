@@ -51,6 +51,7 @@ gufo_extension_target(
     hip/decode_step.cpp
     hip/executor.cpp
     hip/model_loader.cpp
+    hip/moe_ffn.cpp
     hip/prefill.cpp
     hip/prefill_chunk.cpp
     hip/prompt_hidden_buffer.cpp
@@ -70,6 +71,7 @@ gufo_extension_target(
     gufo_qwen
     gufo_cache_hip
     gufo_qwen_kernels
+    gufo_qwen38_flash_next_mmq
     gufo_qwen_vision
     gufo_qwen_draft_vocab
     gufo_compare

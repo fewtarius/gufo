@@ -12,6 +12,7 @@
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/detail/gemv_dispatcher.hpp"
 #include "src/families/qwen/kernels/ops.hpp"
+#include "src/families/qwen/kernels/ops/kv.hpp"
 #include "src/families/qwen/hip_common/quant_ops.hpp"
 
 namespace gufo::hip {
@@ -172,17 +173,27 @@ __launch_bounds__(256, 4) __global__ void FusedQKNormRoPEKvWriteKernel(
 void LaunchFusedQKNormRoPEKvWrite(
     const float* q, const float* k, const float* v, const float* q_weight,
     const float* k_weight, float* q_out, float* k_out, float* k_cache,
-    float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    std::uint32_t layer_idx, const std::uint32_t* d_pos,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    float* v_cache, QwenCompactKv compact, std::uint32_t layer_idx,
+    const std::uint32_t* d_pos, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
     std::uint32_t rotary_dim, float rope_theta, float eps, hipStream_t stream,
     const models::qwen::vision::DeviceRope* rope) {
+  // The binary16 plane only exists for the FP16 format. The q8_0 plane is
+  // written by the encoder below, and the binary16 writers must not touch it.
+  const bool binary16_plane = compact.format == QwenKvFormat::kFp16;
   FusedQKNormRoPEKvWriteKernel<<<num_heads + num_kv_heads, 256, 0, stream>>>(
       q, k, v, q_weight, k_weight, q_out, k_out, k_cache, v_cache,
-      static_cast<__half*>(k_cache_f16), static_cast<__half*>(v_cache_f16),
-      layer_idx, d_pos, max_context, num_heads, num_kv_heads, head_dim,
-      rotary_dim, rope_theta, eps, rope);
+      binary16_plane ? static_cast<__half*>(compact.k) : nullptr,
+      binary16_plane ? static_cast<__half*>(compact.v) : nullptr, layer_idx,
+      d_pos, max_context, num_heads, num_kv_heads, head_dim, rotary_dim,
+      rope_theta, eps, rope);
+  // The q8_0 plane is encoded from the values the fused kernel just wrote,
+  // so the two planes hold the same K and V.
+  if (compact.format == QwenKvFormat::kQ8_0) {
+    LaunchEncodeQ8KvRowsAtDevicePosition(k_out, v, compact.k, compact.v,
+                                         layer_idx, d_pos, 1, max_context,
+                                         num_kv_heads * head_dim, stream);
+  }
 }
 
 }  // namespace gufo::hip

@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "src/families/qwen/hip_common/attention_policy.hpp"
+#include "src/families/qwen/kernels/kv_read.hpp"
 
 // Per-head steps of the split-K fp16 decode attention partials, shared by the
 // wave32 kernels in attention_decode.hip and the wave64 verification kernel.
@@ -65,11 +66,8 @@ __device__ __forceinline__ SplitKPartition SplitKDecodePartition(
 // it back to a convert and a multiply. The 32-lane kernel keeps the plain
 // multiply so its instruction pairing is unchanged.
 template<bool MixedFma>
-__device__ __forceinline__ float DotHalf4(const float4& query,
-                                          const __half* key,
-                                          float negative_zero) {
-  const auto* pairs = reinterpret_cast<const __half2*>(key);
-  const __half2 lower = pairs[0], upper = pairs[1];
+__device__ __forceinline__ float DotHalf4(const float4& query, __half2 lower,
+                                          __half2 upper, float negative_zero) {
   float dot;
   if constexpr (MixedFma) {
     dot = fmaf(query.y, __high2float(lower), negative_zero);
@@ -82,16 +80,23 @@ __device__ __forceinline__ float DotHalf4(const float4& query,
   return dot;
 }
 
+/// The pointer form of DotHalf4, for the FP16 plane.
+template<bool MixedFma>
+__device__ __forceinline__ float DotHalf4(const float4& query,
+                                          const __half* key,
+                                          float negative_zero) {
+  const auto* pairs = reinterpret_cast<const __half2*>(key);
+  return DotHalf4<MixedFma>(query, pairs[0], pairs[1], negative_zero);
+}
+
 // One online-softmax value step for four consecutive fp16 values. The scalar
 // kernel rounds the value product for x and y and the output product for z
 // and w, then fuses the other product; keep both operand roles.
 template<bool MixedFma>
-__device__ __forceinline__ void UpdateHalf4(float4& output, const __half* value,
-                                            float previous_scale,
+__device__ __forceinline__ void UpdateHalf4(float4& output, __half2 lower,
+                                            __half2 upper, float previous_scale,
                                             float value_scale,
                                             float negative_zero) {
-  const auto* pairs = reinterpret_cast<const __half2*>(value);
-  const __half2 lower = pairs[0], upper = pairs[1];
   if constexpr (MixedFma) {
     output.x = fmaf(output.x, previous_scale,
                     fmaf(value_scale, __low2float(lower), negative_zero));
@@ -109,11 +114,23 @@ __device__ __forceinline__ void UpdateHalf4(float4& output, const __half* value,
                   __fmul_rn(output.w, previous_scale));
 }
 
+/// The pointer form of UpdateHalf4, for the FP16 plane.
+template<bool MixedFma>
+__device__ __forceinline__ void UpdateHalf4(float4& output, const __half* value,
+                                            float previous_scale,
+                                            float value_scale,
+                                            float negative_zero) {
+  const auto* pairs = reinterpret_cast<const __half2*>(value);
+  UpdateHalf4<MixedFma>(output, pairs[0], pairs[1], previous_scale, value_scale,
+                        negative_zero);
+}
+
 // One query head's state across a split: its query slice, output
 // accumulators and softmax statistics. Lanes is 32 (one head per wave32) or
 // 16 (two heads per wave32 or four per wave64); a 16-lane head keeps the
 // 32-lane element layout, so lane l holds the original lanes l and l + 16.
-template<unsigned Lanes, bool MixedFma>
+template<unsigned Lanes, bool MixedFma,
+         QwenKvFormat Format = QwenKvFormat::kFp16>
 struct SplitKAttentionHead {
   static_assert(Lanes == 16 || Lanes == 32);
   static constexpr std::uint32_t kHeadDim = 256;
@@ -143,16 +160,35 @@ struct SplitKAttentionHead {
     }
   }
 
+  // The four elements of one vector as the two binary16 pairs the dot
+  // consumes. The q8_0 plane reconstructs them from the block that holds
+  // them; the FP16 plane reads them.
+  __device__ __forceinline__ static void KeyPairs(const KvElements<Format>& key,
+                                                  std::size_t element,
+                                                  __half2& lower,
+                                                  __half2& upper) {
+    if constexpr (Format == QwenKvFormat::kFp16) {
+      const auto* pairs = reinterpret_cast<const __half2*>(
+          static_cast<const __half*>(key.base) + key.offset + element);
+      lower = pairs[0];
+      upper = pairs[1];
+    } else {
+      Q8KvLoadHalf4(static_cast<const Q8KvBlock*>(key.base),
+                    key.offset + element, lower, upper);
+    }
+  }
+
   // This lane's partial of q . k, ready for the score tree.
-  __device__ __forceinline__ float Partial(const __half* key,
+  __device__ __forceinline__ float Partial(const KvElements<Format>& key,
                                            std::uint32_t lane) const {
     if constexpr (Lanes == 32) {
       float score = 0.0F;
 #pragma unroll
       for (std::uint32_t vector = 0; vector < kVectorsPerLane; ++vector) {
-        score +=
-            DotHalf4<MixedFma>(query_values[vector],
-                               key + Vector(lane, vector) * 4, negative_zero);
+        __half2 lower, upper;
+        KeyPairs(key, Vector(lane, vector) * 4, lower, upper);
+        score += DotHalf4<MixedFma>(query_values[vector], lower, upper,
+                                    negative_zero);
       }
       return score;
     } else {
@@ -163,9 +199,10 @@ struct SplitKAttentionHead {
       for (unsigned half = 0; half < 2; ++half) {
 #pragma unroll
         for (unsigned vector = 0; vector < 2; ++vector) {
-          partial[half] += DotHalf4<MixedFma>(
-              query_values[half * 2 + vector],
-              key + Vector(lane, half * 2 + vector) * 4, negative_zero);
+          __half2 lower, upper;
+          KeyPairs(key, Vector(lane, half * 2 + vector) * 4, lower, upper);
+          partial[half] += DotHalf4<MixedFma>(query_values[half * 2 + vector],
+                                              lower, upper, negative_zero);
         }
       }
       return partial[0] + partial[1];
@@ -173,7 +210,8 @@ struct SplitKAttentionHead {
   }
 
   // Online-softmax step for one token's scaled score and value row.
-  __device__ __forceinline__ void Accumulate(float score, const __half* value,
+  __device__ __forceinline__ void Accumulate(float score,
+                                             const KvElements<Format>& value,
                                              std::uint32_t lane) {
     const float new_max = fmaxf(running_max, score);
     const float previous_scale = expf(running_max - new_max);
@@ -182,8 +220,9 @@ struct SplitKAttentionHead {
     running_max = new_max;
 #pragma unroll
     for (std::uint32_t vector = 0; vector < kVectorsPerLane; ++vector) {
-      UpdateHalf4<MixedFma>(output_values[vector],
-                            value + Vector(lane, vector) * 4, previous_scale,
+      __half2 lower, upper;
+      KeyPairs(value, Vector(lane, vector) * 4, lower, upper);
+      UpdateHalf4<MixedFma>(output_values[vector], lower, upper, previous_scale,
                             value_scale, negative_zero);
     }
   }

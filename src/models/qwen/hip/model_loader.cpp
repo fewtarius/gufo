@@ -370,6 +370,13 @@ std::shared_ptr<const QwenGpuModel> QwenGpuModel::CreateFromGguf(
                remap(layer.ssm_dt) && remap(layer.ssm_norm) &&
                remap(layer.ffn_norm) && remap(layer.ffn_gate) &&
                remap(layer.ffn_up) && remap(layer.ffn_down);
+    if (weights_opt->config.IsMoe()) {
+      remapped = remapped && remap(layer.ffn_gate_inp) &&
+                 remap(layer.ffn_gate_exps) && remap(layer.ffn_up_exps) &&
+                 remap(layer.ffn_down_exps) && remap(layer.ffn_gate_shexp) &&
+                 remap(layer.ffn_up_shexp) && remap(layer.ffn_down_shexp) &&
+                 remap(layer.ffn_gate_inp_shexp);
+    }
   }
   if (!remapped) {
     ReleaseWeightRegions(weight_regions);

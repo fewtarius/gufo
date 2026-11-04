@@ -5,6 +5,8 @@
 // host would write, and the dequantizer reconstructs what the host would
 // reconstruct. Any difference is a numeric divergence that would show up
 // as a model output change nobody could explain.
+#include "src/models/laguna/gpu/kernels/kv_q8.hpp"
+
 #include <hip/hip_runtime.h>
 
 #include <cmath>
@@ -13,13 +15,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <gufo/ext/experimental/hip_utils.hpp>
 #include <random>
 #include <vector>
 
-#include <gufo/ext/experimental/hip_utils.hpp>
 #include "src/core/kv_codec/codec.hpp"
 #include "src/models/laguna/gpu/kernels/kernels.hpp"
-#include "src/models/laguna/gpu/kernels/kv_q8.hpp"
 
 namespace {
 
@@ -79,12 +80,12 @@ int main() {
   HIP_CHECK(hipMalloc(&d_v, row_bytes * kNumTokens));
   HIP_CHECK(hipMalloc(&d_pos, sizeof(std::uint32_t)));
   const std::uint32_t start_pos = 0;
-  HIP_CHECK(hipMemcpy(d_pos, &start_pos, sizeof(start_pos),
+  HIP_CHECK(
+      hipMemcpy(d_pos, &start_pos, sizeof(start_pos), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_k_in, device_k.data(), device_k.size() * sizeof(float),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_k_in, device_k.data(),
-                      device_k.size() * sizeof(float), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_v_in, device_v.data(),
-                      device_v.size() * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_v_in, device_v.data(), device_v.size() * sizeof(float),
+                      hipMemcpyHostToDevice));
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -103,12 +104,10 @@ int main() {
   if (!k_match) {
     for (std::size_t i = 0; i < row_bytes; ++i) {
       if (got_k[i] != host_k[i]) {
-        std::fprintf(stderr,
-                     "K byte %zu differs: device=%02x host=%02x\n", i,
-                     static_cast<unsigned>(
-                         std::to_integer<std::uint8_t>(got_k[i])),
-                     static_cast<unsigned>(
-                         std::to_integer<std::uint8_t>(host_k[i])));
+        std::fprintf(
+            stderr, "K byte %zu differs: device=%02x host=%02x\n", i,
+            static_cast<unsigned>(std::to_integer<std::uint8_t>(got_k[i])),
+            static_cast<unsigned>(std::to_integer<std::uint8_t>(host_k[i])));
         break;
       }
     }
@@ -125,18 +124,21 @@ int main() {
   double max_abs = 0.0;
   for (std::uint32_t group = 0; group < kRowDim / 8; ++group) {
     const std::size_t element = group * 8;
-    const auto* block = reinterpret_cast<const gufo::models::laguna::gpu::rocm::
-                                           detail::Q8KvBlock*>(
-        got_k.data()) + element / 32;
-    const auto packed = gufo::models::laguna::gpu::rocm::detail::
-        DequantizeQ8Group(block, static_cast<std::uint32_t>(element % 32));
+    const auto* block =
+        reinterpret_cast<
+            const gufo::models::laguna::gpu::rocm::detail::Q8KvBlock*>(
+            got_k.data()) +
+        element / 32;
+    const auto packed =
+        gufo::models::laguna::gpu::rocm::detail::DequantizeQ8Group(
+            block, static_cast<std::uint32_t>(element % 32));
     __half halves[8];
     std::memcpy(halves, &packed, sizeof(packed));
     for (int i = 0; i < 8; ++i) {
       const float device_value = __half2float(halves[i]);
       max_abs = std::max(
           max_abs, std::fabs(static_cast<double>(device_value) -
-                              static_cast<double>(host_decoded[element + i])));
+                             static_cast<double>(host_decoded[element + i])));
     }
   }
   std::printf("max reconstruction difference: %g\n", max_abs);

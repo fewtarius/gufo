@@ -121,7 +121,7 @@ Decisions on the open questions:
   in [todo.md](todo.md). The 0.34 s commit-time estimate above was not
   measured separately; the whole Flash-Next load took 21 s.
 - **Breaking change:** yes. PR #543 merged into `fedeizzo/cache-staging`
-  without `!`; the pull request that brings the branch into `main` must carry
+  without `!`; the pull request that brings the branch into `unstable` must carry
   `!` (recorded in the todo's final row).
 
 Checks: `component_text_cache_test` adds startup eviction under a lowered

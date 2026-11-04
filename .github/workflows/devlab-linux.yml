@@ -21,7 +21,7 @@ on:
         default: false
         type: boolean
       benchmark:
-        description: Also benchmark native AR through 128K on the PR merged into main and on main
+        description: Also benchmark native AR through 128K on the PR merged into unstable and on unstable
         default: false
         type: boolean
 
@@ -84,10 +84,10 @@ jobs:
           [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::Invalid PR number"; exit 1; }
           # Test the revision that triggered the event; a later push starts its own run.
           head=${EVENT_HEAD:-$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)}
-          # Like CI, test the PR merged into main: suites from main then always
+          # Like CI, test the PR merged into unstable: suites from unstable then always
           # run against a binary that contains the server changes they expect.
           merge=${EVENT_MERGE:-$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.merge_commit_sha // empty')}
-          [[ -n "$merge" ]] || { echo "::error::PR does not merge cleanly into main; rebase it."; exit 1; }
+          [[ -n "$merge" ]] || { echo "::error::PR does not merge cleanly into unstable; rebase it."; exit 1; }
           {
             echo "head=$head"
             echo "merge=$merge"

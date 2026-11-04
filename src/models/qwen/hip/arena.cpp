@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "src/families/qwen/hip_common/attention_policy.hpp"
+#include "src/core/logging/logging.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
@@ -815,6 +816,28 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
                                              policy_.recurrent_state_storage)));
 
     Reset();
+    // The arena's footprint is the part of the device pool that does not
+    // move with the context alone: the scratch is sized for the batch
+    // cap, not for the context, so a run that fits at one context can
+    // still fail at the next one. Log the split so a load failure has a
+    // number to point at.
+    {
+      const auto usage = EstimateMemoryUsage(config_, max_context_, policy_);
+      std::size_t heap_free = 0, heap_total = 0;
+      (void)hipMemGetInfo(&heap_free, &heap_total);
+      const auto mib = [](std::size_t bytes) {
+        return bytes / (1024ULL * 1024ULL);
+      };
+      server::Logger::Info("loader",
+                   "event=memory_plan kind=qwen context=" +
+                       std::to_string(max_context_) + " batch=" +
+                       std::to_string(batch) + " scratch_mib=" +
+                       std::to_string(mib(usage.temporary_scratch_bytes)) +
+                       " state_mib=" +
+                       std::to_string(mib(usage.request_state_bytes)) +
+                       " device_free_mib=" + std::to_string(mib(heap_free)) +
+                       " device_total_mib=" + std::to_string(mib(heap_total)));
+    }
   } catch (...) {
     FreeAll();
     throw;

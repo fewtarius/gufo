@@ -1,4 +1,5 @@
 #include "src/models/qwen/runner.hpp"
+#include "src/core/logging/logging.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
 
@@ -745,6 +746,29 @@ public:
     if (capacity.has_value()) {
       snapshot_capacity = std::min(snapshot_capacity, *capacity);
       snapshot_ceiling = std::min(snapshot_ceiling, *capacity);
+    }
+    // The device pool is the binding constraint on a unified-memory APU:
+    // the weights, the scratch, the per-request state and the snapshot
+    // retention all come out of the same pool. Log the split once, so a
+    // load that does not fit has a number to point at instead of a
+    // driver-level fault.
+    {
+      const auto mib = [](std::size_t bytes) {
+        return bytes / (1024ULL * 1024ULL);
+      };
+      server::Logger::Info("loader",
+                   "event=memory_plan kind=qwen context=" +
+                       std::to_string(max_context_) + " weights_mib=" +
+                       std::to_string(mib(resident_weights)) + " scratch_mib=" +
+                       std::to_string(mib(usage.temporary_scratch_bytes)) +
+                       " state_mib=" +
+                       std::to_string(mib(usage.request_state_bytes)) +
+                       " snapshot_mib=" +
+                       std::to_string(mib(snapshot_capacity)) +
+                       " device_free_mib=" +
+                       std::to_string(capacity.value_or(0) / (1024 * 1024)) +
+                       " device_total_mib=" +
+                       std::to_string(total_bytes / (1024 * 1024)));
     }
     return {
         .resident_weights_bytes = resident_weights,

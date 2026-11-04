@@ -120,9 +120,6 @@ tests/quality/compsec.json
 # Claude Code local settings
 .claude/settings.local.json
 
-# CLIO local state
-.clio/
-
 # CLIO (managed automatically)
 .clio/*
 !.clio/instructions.md

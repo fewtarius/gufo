@@ -26,6 +26,7 @@
 #include "src/families/qwen/control_tokens/control_tokens.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/hip_common/execution_policy.hpp"
+#include "src/core/hip/heap_placement.hpp"
 #include "src/families/qwen/text/chat_template.hpp"
 #include "src/families/qwen/text/tokenizer.hpp"
 #include "src/families/qwen/vision/encoder.hpp"
@@ -745,7 +746,21 @@ public:
     std::size_t snapshot_ceiling = HostSnapshotCeilingBytes();
     if (capacity.has_value()) {
       snapshot_capacity = std::min(snapshot_capacity, *capacity);
+      // On a unified-memory APU the device heap and the host RAM are one
+      // pool, and the model's device-resident weights are charged to it.
+      // The host headroom is therefore spent before the cache gets any
+      // budget at all: the ceiling collapses to zero, the cache's
+      // persistence limit follows it down, and every snapshot pin fails
+      // with a bare std::bad_alloc.
+      //
+      // The device heap is already net of the weights and the scratch, so
+      // it is the figure the cache can actually spend. Use it when the
+      // host figure is depleted, and keep the host figure otherwise so a
+      // discrete GPU does not hand the cache more than the host has.
       snapshot_ceiling = std::min(snapshot_ceiling, *capacity);
+      if (snapshot_ceiling == 0 && *capacity != 0) {
+        snapshot_ceiling = *capacity;
+      }
     }
     // The device pool is the binding constraint on a unified-memory APU:
     // the weights, the scratch, the per-request state and the snapshot
@@ -1172,6 +1187,43 @@ std::shared_ptr<ext::TextModelRunner> CreateQwenTextRunner(
     if (error)
       *error = "HTTP context exceeds the loaded Qwen model context";
     return nullptr;
+  }
+  // Pick the largest context the device can hold. The weights are resident
+  // now, so what is left of the device heap is what the KV cache and the
+  // scratch can use. Without this the native window is taken at face value
+  // and a model whose KV cache does not fit fails to load with a bare
+  // std::bad_alloc from the cache ledger instead of a context that works.
+  //
+  // An explicit --context is the operator's decision to honour or to
+  // refuse, never to reduce silently.
+  if (options.max_context == 0) {
+    const std::uint32_t native = max_context;
+    std::uint32_t chosen = native;
+    const auto policy = hip::QwenExecutionPolicy::Production();
+    const auto footprint = [&](std::uint32_t context) {
+      const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
+          model->GetConfig(), context, policy);
+      return usage.temporary_scratch_bytes + usage.request_state_bytes;
+    };
+    std::size_t heap_free = 0;
+    std::size_t heap_total = 0;
+    if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
+        heap_free != 0) {
+      while (chosen > 4096 &&
+             !hip::HeapFitsAboveReserve(heap_free, footprint(chosen))) {
+        chosen /= 2;
+      }
+      if (chosen != native) {
+        server::Logger::Info(
+            "loader",
+            "event=context_clamped native=" + std::to_string(native) +
+                " chosen=" + std::to_string(chosen) +
+                " reason=kv_cache_exceeds_free_device_memory free_mib=" +
+                std::to_string(heap_free / (1024 * 1024)) + " needed_mib=" +
+                std::to_string(footprint(chosen) / (1024 * 1024)));
+        max_context = chosen;
+      }
+    }
   }
   if (options.speculative.backend == ext::TextSpeculativeBackend::kDSpark) {
     if (error)

@@ -60,8 +60,8 @@ void TestNormRoPEWithoutCache() {
           gufo::hip::LaunchBatchedFusedQKNormRoPEKvWrite(
               heads != 0 ? q_fused.data() : nullptr, k_fused.data(),
               k_fused.data(), weight.data(), weight.data(), q_fused.data(),
-              k_fused.data(), nullptr, nullptr, nullptr, nullptr, 0, position,
-              rows, 0, heads, kv_heads, dim, 64, 10000000.0F);
+              k_fused.data(), nullptr, nullptr, {}, 0, position, rows, 0, heads,
+              kv_heads, dim, 64, 10000000.0F);
           const auto check = [](const auto& expected, const auto& actual) {
             const auto a = expected.CopyToHost(), b = actual.CopyToHost();
             if (std::memcmp(a.data(), b.data(), a.size() * sizeof(float))) {
@@ -179,22 +179,27 @@ void TestFusedQKNormRoPEKvWriteEquivalence() {
                                   head_dim, eps);
   gufo::hip::LaunchRoPE(d_q_ref, d_k_ref, num_heads, num_kv_heads, head_dim,
                         rotary_dim, d_pos, rope_theta);
-  gufo::hip::LaunchAttention(d_q_ref, d_k_ref, d_v_ref, d_gate, d_kc_ref,
-                             d_vc_ref, d_kc16_ref, d_vc16_ref, d_out_ref,
-                             layer_idx, d_pos, max_context, num_heads,
-                             num_kv_heads, head_dim, nullptr,
-                             /*skip_kv_write=*/false);
+  gufo::hip::LaunchAttention(
+      d_q_ref, d_k_ref, d_v_ref, d_gate, d_kc_ref, d_vc_ref,
+      gufo::hip::QwenCompactKv{d_kc16_ref, d_vc16_ref,
+                               gufo::hip::QwenKvFormat::kFp16},
+      d_out_ref, layer_idx, d_pos, max_context, num_heads, num_kv_heads,
+      head_dim, nullptr, /*skip_kv_write=*/false);
 
   // Fused chain
   gufo::hip::LaunchFusedQKNormRoPEKvWrite(
       d_q_fus, d_k_fus, d_v_fus, d_wq, d_wk, d_q_fus, d_k_fus, d_kc_fus,
-      d_vc_fus, d_kc16_fus, d_vc16_fus, layer_idx, d_pos, max_context,
-      num_heads, num_kv_heads, head_dim, rotary_dim, rope_theta, eps);
-  gufo::hip::LaunchAttention(d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus,
-                             d_vc_fus, d_kc16_fus, d_vc16_fus, d_out_fus,
-                             layer_idx, d_pos, max_context, num_heads,
-                             num_kv_heads, head_dim, nullptr,
-                             /*skip_kv_write=*/true);
+      d_vc_fus,
+      gufo::hip::QwenCompactKv{d_kc16_fus, d_vc16_fus,
+                               gufo::hip::QwenKvFormat::kFp16},
+      layer_idx, d_pos, max_context, num_heads, num_kv_heads, head_dim,
+      rotary_dim, rope_theta, eps);
+  gufo::hip::LaunchAttention(
+      d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus, d_vc_fus,
+      gufo::hip::QwenCompactKv{d_kc16_fus, d_vc16_fus,
+                               gufo::hip::QwenKvFormat::kFp16},
+      d_out_fus, layer_idx, d_pos, max_context, num_heads, num_kv_heads,
+      head_dim, nullptr, /*skip_kv_write=*/true);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -413,7 +418,9 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
     gufo::hip::LaunchAttention(
         d_q_ref + t * head_total, d_k_ref + t * kv_total,
         d_v_ref + t * kv_total, d_gate + t * head_total, d_kc_ref, d_vc_ref,
-        d_kc16_ref, d_vc16_ref, d_out_ref + t * head_total, layer_idx,
+        gufo::hip::QwenCompactKv{d_kc16_ref, d_vc16_ref,
+                                 gufo::hip::QwenKvFormat::kFp16},
+        d_out_ref + t * head_total, layer_idx,
         static_cast<std::uint32_t>(start_pos + t), max_context, num_heads,
         num_kv_heads, head_dim, nullptr, nullptr, /*skip_kv_write=*/false);
   }
@@ -421,12 +428,16 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
   // Batched fused chain
   gufo::hip::LaunchBatchedFusedQKNormRoPEKvWrite(
       d_q_fus, d_k_fus, d_v_fus, d_wq, d_wk, d_q_fus, d_k_fus, d_kc_fus,
-      d_vc_fus, d_kc16_fus, d_vc16_fus, layer_idx, start_pos, batch,
-      max_context, num_heads, num_kv_heads, head_dim, rotary_dim, rope_theta,
-      eps);
-  gufo::hip::LaunchBatchedAttention(d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus,
-                                    d_vc_fus, d_kc16_fus, d_vc16_fus, d_out_fus,
-                                    layer_idx, start_pos, batch, max_context,
+      d_vc_fus,
+      gufo::hip::QwenCompactKv{d_kc16_fus, d_vc16_fus,
+                               gufo::hip::QwenKvFormat::kFp16},
+      layer_idx, start_pos, batch, max_context, num_heads, num_kv_heads,
+      head_dim, rotary_dim, rope_theta, eps);
+  gufo::hip::LaunchBatchedAttention(
+      d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus, d_vc_fus,
+      gufo::hip::QwenCompactKv{d_kc16_fus, d_vc16_fus,
+                               gufo::hip::QwenKvFormat::kFp16},
+      d_out_fus, layer_idx, start_pos, batch, max_context,
                                     num_heads, num_kv_heads, head_dim, nullptr,
                                     /*skip_kv_write=*/true);
 

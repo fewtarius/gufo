@@ -42,7 +42,10 @@ private:
 
 class TransferPool {
 public:
-  // Creates all nonblocking streams and timing-disabled events at startup.
+  // A slot's nonblocking stream and timing-disabled event are created when
+  // the slot is first leased. A HIP stream reserves a command buffer in the
+  // device heap, so a pool sized for the worst case would hold hundreds of
+  // megabytes that a server with a handful of sessions never uses.
   explicit TransferPool(std::size_t capacity);
   // Returns null on exhaustion. No HIP allocation/stream/event creation here.
   // A pair returns only after BOTH stream and completion release their lease.

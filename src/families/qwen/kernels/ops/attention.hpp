@@ -6,6 +6,7 @@
 #include <span>
 
 #include "src/core/gguf_reader.hpp"
+#include "src/families/qwen/hip_common/execution_policy.hpp"
 #include "src/families/qwen/hip_common/rope.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
@@ -25,13 +26,14 @@ void LaunchFusedQKVProjections(const void* q_w, core::GgmlType q_type,
                                hipStream_t stream = nullptr);
 
 /// Computes Grouped-Query Softmax Attention with KV-cache and optional gating
-/// on GPU. Production supplies canonical FP16 K/V; the independent validation
-/// fallback supplies FP32 K/V. Tests may supply both representations. When
-/// skip_kv_write is true the selected KV cache is assumed already written
-/// (e.g. by the fused QK norm+RoPE kernel, opt-c010-qk-rope-kv).
+/// on GPU. Production supplies the canonical K/V plane, either FP16 or q8_0;
+/// the independent validation fallback supplies FP32 K/V. Tests may supply
+/// both representations. When skip_kv_write is true the selected KV cache is
+/// assumed already written (e.g. by the fused QK norm+RoPE kernel,
+/// opt-c010-qk-rope-kv).
 void LaunchAttention(const float* q, const float* k, const float* v,
                      const float* gate, float* k_cache, float* v_cache,
-                     void* k_cache_f16, void* v_cache_f16, float* out_context,
+                     QwenCompactKv compact, float* out_context,
                      std::uint32_t layer_idx, std::uint32_t pos,
                      std::uint32_t max_context, std::uint32_t num_heads,
                      std::uint32_t num_kv_heads, std::uint32_t head_dim,
@@ -46,16 +48,15 @@ void LaunchAttention(const float* q, const float* k, const float* v,
 /// supported GQA heads use bounded online attention at every causal depth.
 void LaunchCausalDecodeAttention(
     const float* q, const float* gate, float* k_cache, float* v_cache,
-    void* k_cache_f16, void* v_cache_f16, float* out_context,
-    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    QwenCompactKv compact, float* out_context, std::uint32_t layer_idx,
+    std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
     hipStream_t stream = nullptr, std::span<float> split_k_scratch = {});
 
 /// Computes Grouped-Query Softmax Attention reading position from device memory
 void LaunchAttention(const float* q, const float* k, const float* v,
                      const float* gate, float* k_cache, float* v_cache,
-                     void* k_cache_f16, void* v_cache_f16, float* out_context,
+                     QwenCompactKv compact, float* out_context,
                      std::uint32_t layer_idx, const std::uint32_t* d_pos,
                      std::uint32_t max_context, std::uint32_t num_heads,
                      std::uint32_t num_kv_heads, std::uint32_t head_dim,
@@ -63,15 +64,14 @@ void LaunchAttention(const float* q, const float* k, const float* v,
 
 /// Fuses per-head Q/K RMSNorm, RoPE, and the KV-cache write for a single decode
 /// token into one launch (opt-c010-qk-rope-kv). Writes the normed+roped Q into
-/// q_out and the normed+roped K into k_out, and K/V into every non-null cache
-/// representation supplied by the caller.
+/// q_out and the normed+roped K into k_out, and K/V into the FP32 reference
+/// plane and the selected canonical plane.
 void LaunchFusedQKNormRoPEKvWrite(
     const float* q, const float* k, const float* v, const float* q_weight,
     const float* k_weight, float* q_out, float* k_out, float* k_cache,
-    float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    std::uint32_t layer_idx, const std::uint32_t* d_pos,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    float* v_cache, QwenCompactKv compact, std::uint32_t layer_idx,
+    const std::uint32_t* d_pos, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
     std::uint32_t rotary_dim, float rope_theta, float eps = 1e-6F,
     hipStream_t stream = nullptr,
     const models::qwen::vision::DeviceRope* rope = nullptr);
@@ -84,50 +84,48 @@ void LaunchFusedQKNormRoPEKvWrite(
 /// use bounded online attention for supported 256-element GQA heads.
 void LaunchBatchedAttention(const float* q, const float* k, const float* v,
                             const float* gate, float* k_cache, float* v_cache,
-                            void* k_cache_f16, void* v_cache_f16,
-                            float* out_context, std::uint32_t layer_idx,
-                            std::uint32_t start_pos, std::size_t batch_size,
-                            std::uint32_t max_context, std::uint32_t num_heads,
-                            std::uint32_t num_kv_heads, std::uint32_t head_dim,
-                            hipStream_t stream = nullptr,
+                            QwenCompactKv compact, float* out_context,
+                            std::uint32_t layer_idx, std::uint32_t start_pos,
+                            std::size_t batch_size, std::uint32_t max_context,
+                            std::uint32_t num_heads, std::uint32_t num_kv_heads,
+                            std::uint32_t head_dim, hipStream_t stream = nullptr,
                             bool skip_kv_write = false,
                             void* out_context_bf16 = nullptr);
 
 /// Batched fuse of per-head Q/K RMSNorm, RoPE, and the KV-cache write across B
 /// tokens into one launch (opt-c010-qk-rope-kv). Writes the normed+roped Q into
-/// q_out and the normed+roped K into k_out, and K/V into every non-null cache
-/// representation supplied by the caller.
+/// q_out and the normed+roped K into k_out, and K/V into the FP32 reference
+/// plane and the selected canonical plane.
 void LaunchBatchedFusedQKNormRoPEKvWrite(
     const float* q, const float* k, const float* v, const float* q_weight,
     const float* k_weight, float* q_out, float* k_out, float* k_cache,
-    float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    float* v_cache, QwenCompactKv compact, std::uint32_t layer_idx,
+    std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
     std::uint32_t rotary_dim, float rope_theta, float eps = 1e-6F,
     hipStream_t stream = nullptr,
     const models::qwen::vision::DeviceRope* rope = nullptr);
 
 /// Qwen3.8-specific causal GQA tile for gfx1151. The kernel processes 16 query
-/// positions and two query heads per block while reusing one FP16 K/V tile.
-/// Returns false for unsupported model shapes.
+/// positions and two query heads per block while reusing one canonical K/V
+/// tile. Returns false for unsupported model shapes.
 /// `lse_out`, when non-null, makes this one half of a split attention: the
 /// kernel starts at `key_begin`, writes the partial log-sum-exp per
 /// [head, token], and leaves the SiLU gate to the merge step. `skip_kv_write`
 /// suppresses the KV-cache pack/sync when another half already did it.
 [[nodiscard]] bool LaunchBatchedAttentionTile(
     const float* q, const float* k, const float* v, const float* gate,
-    float* k_cache, float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    float* out_context, std::uint32_t layer_idx, std::uint32_t start_pos,
-    std::size_t batch_size, std::uint32_t max_context, std::uint32_t num_heads,
+    float* k_cache, float* v_cache, QwenCompactKv compact, float* out_context,
+    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
+    std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t head_dim,
     hipStream_t stream = nullptr, float* lse_out = nullptr,
     std::uint32_t key_begin = 0, bool skip_kv_write = false);
 
 /// Masked prefill attention on the WMMA matrix cores.
 /// Same contract as LaunchBatchedAttentionTile: it
-/// packs the FP16 K/V cache unless `skip_kv_write`, masks keys in
-/// [`key_begin`, min(context_end, query position]), and emits the partial
+/// packs the canonical K/V cache unless `skip_kv_write`, masks keys in
+/// [`key_begin`, min(context_end, query position)], and emits the partial
 /// log-sum-exp into `lse_out` (suppressing the gate) when that is non-null.
 /// Optional workspace spans hold temporary KV layouts and must not alias live
 /// inputs, outputs or each other. Heads reuse the workspace in bounded groups
@@ -138,9 +136,9 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
 /// Returns false when the shape is unsupported, so the caller can fall back.
 [[nodiscard]] bool LaunchQwenWmmaAttention(
     const float* q, const float* k, const float* v, const float* gate,
-    float* k_cache, float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    float* out_context, std::uint32_t layer_idx, std::uint32_t start_pos,
-    std::size_t batch_size, std::uint32_t max_context, std::uint32_t num_heads,
+    float* k_cache, float* v_cache, QwenCompactKv compact, float* out_context,
+    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
+    std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t head_dim,
     hipStream_t stream = nullptr, float* lse_out = nullptr,
     std::uint32_t key_begin = 0, bool skip_kv_write = false,
@@ -151,12 +149,11 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
 /// [batch, context] score buffer.
 void LaunchBatchedAttentionGemm(
     hipblasHandle_t handle, const float* q, const float* k, const float* v,
-    const float* gate, float* k_cache, float* v_cache, void* k_cache_f16,
-    void* v_cache_f16, float* scores, float* out_context,
-    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
-    std::uint32_t max_context, std::uint32_t num_heads,
-    std::uint32_t num_kv_heads, std::uint32_t head_dim,
-    hipStream_t stream = nullptr);
+    const float* gate, float* k_cache, float* v_cache, QwenCompactKv compact,
+    float* scores, float* out_context, std::uint32_t layer_idx,
+    std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
+    std::uint32_t num_heads, std::uint32_t num_kv_heads,
+    std::uint32_t head_dim, hipStream_t stream = nullptr);
 
 }  // namespace gufo::hip
 

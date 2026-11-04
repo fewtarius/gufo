@@ -285,11 +285,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
             static_cast<const float*>(layer.attn_q_norm.data),
             static_cast<const float*>(layer.attn_k_norm.data), arena_.d_q,
             arena_.d_k, arena_.d_kv_cache,
-            OffsetIfPresent(arena_.d_kv_cache, total_k),
-            arena_.d_attention_kv_f16,
-            OffsetIfPresent(
-                static_cast<std::uint16_t*>(arena_.d_attention_kv_f16),
-                total_k),
+            OffsetIfPresent(arena_.d_kv_cache, total_k), arena_.CompactKv(),
             attn_layer_idx, start_pos, batch_size, arena_.GetMaxContext(),
             config.num_attention_heads, config.num_key_value_heads,
             config.head_dim, config.rotary_dim, config.rope_theta, eps,
@@ -330,10 +326,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       const bool wmma_attention = LaunchQwenWmmaAttention(
           arena_.d_q, arena_.d_k, arena_.d_v, arena_.d_ssm_gate,
           arena_.d_kv_cache, OffsetIfPresent(arena_.d_kv_cache, total_k),
-          arena_.d_attention_kv_f16,
-          OffsetIfPresent(
-              static_cast<std::uint16_t*>(arena_.d_attention_kv_f16), total_k),
-          arena_.d_ssm_out, attn_layer_idx, start_pos, batch_size,
+          arena_.CompactKv(), arena_.d_ssm_out, attn_layer_idx, start_pos,
+          batch_size,
           arena_.GetMaxContext(), config.num_attention_heads,
           config.num_key_value_heads, config.head_dim, arena_.stream,
           /*lse_out=*/nullptr, /*key_begin=*/0,
@@ -352,11 +346,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                   arena_.d_q, arena_.d_k, arena_.d_v, arena_.d_ssm_gate,
                   arena_.d_kv_cache,
                   OffsetIfPresent(arena_.d_kv_cache, total_k),
-                  arena_.d_attention_kv_f16,
-                  OffsetIfPresent(
-                      static_cast<std::uint16_t*>(arena_.d_attention_kv_f16),
-                      total_k),
-                  arena_.d_ssm_out, attn_layer_idx, start_pos, batch_size,
+                  arena_.CompactKv(), arena_.d_ssm_out, attn_layer_idx,
+                  start_pos, batch_size,
                   arena_.GetMaxContext(), config.num_attention_heads,
                   config.num_key_value_heads, config.head_dim, arena_.stream);
               return tiled_attention;
@@ -366,14 +357,10 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                   arena_.d_q, arena_.d_k, arena_.d_v, arena_.d_ssm_gate,
                   arena_.d_kv_cache,
                   OffsetIfPresent(arena_.d_kv_cache, total_k),
-                  arena_.d_attention_kv_f16,
-                  OffsetIfPresent(
-                      static_cast<std::uint16_t*>(arena_.d_attention_kv_f16),
-                      total_k),
-                  arena_.d_ssm_out, attn_layer_idx, start_pos, batch_size,
-                  arena_.GetMaxContext(), config.num_attention_heads,
-                  config.num_key_value_heads, config.head_dim, arena_.stream,
-                  fused_qknorm_rope_kv);
+                  arena_.CompactKv(), arena_.d_ssm_out, attn_layer_idx,
+                  start_pos, batch_size, arena_.GetMaxContext(),
+                  config.num_attention_heads, config.num_key_value_heads,
+                  config.head_dim, arena_.stream, fused_qknorm_rope_kv);
             });
         if (tiled_attention) {
           detail::EmitAttentionDispatch("prefill_tiled", "");

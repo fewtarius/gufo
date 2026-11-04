@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <span>
@@ -52,6 +53,29 @@ static_assert(kQwenMaxResumeTokens ==
 [[nodiscard]] inline hip::ComponentCacheHooks HipComponentCacheHooks() {
   return {[] { return ext::HostSnapshotCeilingBytes(); },
           [](std::string_view) {}, [](std::string_view) {}};
+}
+
+/// The K/V cache format the operator selected.
+///
+/// `QWEN_KV_CACHE_TYPE` accepts `f16` or `q8_0`. F16 is the default. The
+/// q8_0 format stores the canonical plane as ggml q8_0 blocks; it is a
+/// memory trade, not a speed one.
+[[nodiscard]] hip::QwenExecutionPolicy SelectExecutionPolicy() {
+  auto policy = hip::QwenExecutionPolicy::Production();
+  const char* const value = std::getenv("QWEN_KV_CACHE_TYPE");
+  if (value == nullptr || *value == '\0') {
+    return policy;
+  }
+  const std::string type(value);
+  if (type == "f16") {
+    return policy;
+  }
+  if (type == "q8_0") {
+    policy.kv_cache_storage = hip::QwenKvCacheStorage::kQ8_0;
+    return policy;
+  }
+  throw std::invalid_argument(
+      "QWEN_KV_CACHE_TYPE must be f16 or q8_0, got: " + type);
 }
 
 template<typename State, typename Tokens>
@@ -608,7 +632,16 @@ public:
         max_context_(max_context),
         speculative_options_(speculative_options),
         dflash_policy_(dflash_policy),
-        execution_policy_(hip::QwenExecutionPolicy::Production()) {
+        execution_policy_(SelectExecutionPolicy()) {
+    if (execution_policy_.UsesQ8AttentionKv()) {
+      const auto& config = model_->GetConfig();
+      const auto kv_width =
+          static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
+      if (kv_width % 32 != 0) {
+        throw std::invalid_argument(
+            "the q8_0 K/V cache needs a KV width that is a multiple of 32");
+      }
+    }
     if (!artifact_fingerprint.empty()) {
       const bool speculative = dflash_model_ != nullptr;
       persistence_ = TextRunnerPersistenceDescriptor{
@@ -686,7 +719,7 @@ public:
         .model_id = model_->GetConfig().model_name,
         .state_abi =
             std::string(QwenStateAbi(
-                speculative_enabled, execution_policy_.UsesFp16AttentionKv(),
+                speculative_enabled, execution_policy_.kv_cache_storage,
                 execution_policy_.UsesBf16RecurrentState())) +
             "-component-v2",
         .max_context = max_context_,
@@ -745,7 +778,6 @@ public:
     std::size_t snapshot_capacity = HostSnapshotBudgetBytes();
     std::size_t snapshot_ceiling = HostSnapshotCeilingBytes();
     if (capacity.has_value()) {
-      snapshot_capacity = std::min(snapshot_capacity, *capacity);
       // On a unified-memory APU the device heap and the host RAM are one
       // pool, and the model's device-resident weights are charged to it.
       // The host headroom is therefore spent before the cache gets any
@@ -757,6 +789,13 @@ public:
       // it is the figure the cache can actually spend. Use it when the
       // host figure is depleted, and keep the host figure otherwise so a
       // discrete GPU does not hand the cache more than the host has.
+      //
+      // The claim is made twice: once before the sessions allocate and once
+      // after. The second claim sees the pool net of the session's own state
+      // and scratch, so it is the figure the cache budget follows. Do not
+      // subtract the state here: the second claim would count it twice and
+      // collapse the budget to zero.
+      snapshot_capacity = std::min(snapshot_capacity, *capacity);
       snapshot_ceiling = std::min(snapshot_ceiling, *capacity);
       if (snapshot_ceiling == 0 && *capacity != 0) {
         snapshot_ceiling = *capacity;

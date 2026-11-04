@@ -247,8 +247,8 @@ void QwenDFlashGpuExecutor::InjectTargetContextBatch(
         LaunchBatchedFusedQKNormRoPEKvWrite(
             nullptr, key, key, nullptr,
             static_cast<const float*>(layer.attn_k_norm.data), nullptr, key,
-            nullptr, nullptr, nullptr, nullptr, 0, request.position, count, 0,
-            0, config.num_key_value_heads, config.head_dim, config.rotary_dim,
+            nullptr, nullptr, {}, 0, request.position, count, 0, 0,
+            config.num_key_value_heads, config.head_dim, config.rotary_dim,
             config.rope_theta, 1e-6F, stream);
       } else {
         LaunchBatchedRoPE(nullptr, key, count, 0, config.num_key_value_heads,
@@ -448,7 +448,7 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
       LaunchBatchedFusedQKNormRoPEKvWrite(
           query, key, key, static_cast<const float*>(layer.attn_q_norm.data),
           static_cast<const float*>(layer.attn_k_norm.data), query, key,
-          nullptr, nullptr, nullptr, nullptr, 0, requests[index].position,
+          nullptr, nullptr, {}, 0, requests[index].position,
           counts[index] + 1U, 0, config.num_attention_heads,
           config.num_key_value_heads, config.head_dim, config.rotary_dim,
           config.rope_theta, 1e-6F, stream);

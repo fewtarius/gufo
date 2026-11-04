@@ -84,18 +84,20 @@ void TestLongContextBatchedAttention(bool fp16) {
       d_v, fp16 ? static_cast<const void*>(half_values.data()) : values.data(),
       cache_bytes, hipMemcpyHostToDevice));
   for (const std::uint32_t first : {16125U, 16382U, 32766U, 99998U}) {
+    const gufo::hip::QwenCompactKv compact{
+        fp16 ? d_k : nullptr, fp16 ? d_v : nullptr,
+        gufo::hip::QwenKvFormat::kFp16};
     gufo::hip::LaunchBatchedAttention(
         d_q, nullptr, nullptr, d_gate,
         fp16 ? nullptr : static_cast<float*>(d_k),
-        fp16 ? nullptr : static_cast<float*>(d_v), fp16 ? d_k : nullptr,
-        fp16 ? d_v : nullptr, d_batch, 0, first, rows, capacity, heads,
-        kv_heads, dim, nullptr, true, d_bf16);
+        fp16 ? nullptr : static_cast<float*>(d_v), compact, d_batch, 0, first,
+        rows, capacity, heads, kv_heads, dim, nullptr, true, d_bf16);
     for (std::size_t row = 0; row < rows; ++row)
       gufo::hip::LaunchAttention(
           d_q + row * width, nullptr, nullptr, d_gate + row * width,
           fp16 ? nullptr : static_cast<float*>(d_k),
-          fp16 ? nullptr : static_cast<float*>(d_v), fp16 ? d_k : nullptr,
-          fp16 ? d_v : nullptr, d_scalar + row * width, 0,
+          fp16 ? nullptr : static_cast<float*>(d_v), compact,
+          d_scalar + row * width, 0,
           first + static_cast<std::uint32_t>(row), capacity, heads, kv_heads,
           dim, nullptr, nullptr, true);
     HIP_CHECK(hipGetLastError());
@@ -251,8 +253,11 @@ void TestLongContextDecodeAttention(bool fp16) {
     gufo::hip::LaunchAttention(
         d_q, d_k, d_v, d_gate, fp16 ? nullptr : static_cast<float*>(d_k_cache),
         fp16 ? nullptr : static_cast<float*>(d_v_cache),
-        fp16 ? d_k_cache : nullptr, fp16 ? d_v_cache : nullptr, d_out, 0,
-        position, max_context, num_heads, num_kv_heads, head_dim, nullptr,
+        gufo::hip::QwenCompactKv{fp16 ? d_k_cache : nullptr,
+                                 fp16 ? d_v_cache : nullptr,
+                                 gufo::hip::QwenKvFormat::kFp16},
+        d_out, 0, position, max_context, num_heads, num_kv_heads, head_dim,
+        nullptr,
         d_split_k_scratch);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -404,7 +409,7 @@ void TestBaselineToTiledKvCacheTransition() {
     gufo::hip::LaunchAttention(d_q + token * attention_width,
                                d_k + token * kv_width, d_v + token * kv_width,
                                d_gate + token * attention_width, d_cache_seq,
-                               d_cache_seq + cache_elements, nullptr, nullptr,
+                               d_cache_seq + cache_elements, {},
                                d_out_seq + token * attention_width, 0,
                                static_cast<std::uint32_t>(token), max_context,
                                num_heads, num_kv_heads, head_dim);
@@ -414,8 +419,10 @@ void TestBaselineToTiledKvCacheTransition() {
   // Chunk 0 (0..512): LaunchBatchedAttention (Baseline)
   gufo::hip::LaunchBatchedAttention(
       d_q, d_k, d_v, d_gate, d_cache_trans, d_cache_trans + cache_elements,
-      d_cache_trans_f16,
-      static_cast<std::uint16_t*>(d_cache_trans_f16) + cache_elements,
+      gufo::hip::QwenCompactKv{
+          d_cache_trans_f16,
+          static_cast<std::uint16_t*>(d_cache_trans_f16) + cache_elements,
+          gufo::hip::QwenKvFormat::kFp16},
       d_out_trans, 0, 0, chunk0_size, max_context, num_heads, num_kv_heads,
       head_dim);
 
@@ -424,8 +431,11 @@ void TestBaselineToTiledKvCacheTransition() {
   const bool chunk1_ok = gufo::hip::LaunchBatchedAttentionTile(
       d_q + chunk0_size * attention_width, d_k + chunk0_size * kv_width,
       d_v + chunk0_size * kv_width, d_gate + chunk0_size * attention_width,
-      d_cache_trans, d_cache_trans + cache_elements, d_cache_trans_f16,
-      static_cast<std::uint16_t*>(d_cache_trans_f16) + cache_elements,
+      d_cache_trans, d_cache_trans + cache_elements,
+      gufo::hip::QwenCompactKv{
+          d_cache_trans_f16,
+          static_cast<std::uint16_t*>(d_cache_trans_f16) + cache_elements,
+          gufo::hip::QwenKvFormat::kFp16},
       d_out_trans + chunk0_size * attention_width, 0,
       static_cast<std::uint32_t>(chunk0_size), chunk1_size, max_context,
       num_heads, num_kv_heads, head_dim);

@@ -35,7 +35,7 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
         "Qwen DFlash disk cache requires a draft artifact fingerprint");
   }
   const std::string_view state_abi =
-      QwenStateAbi(speculative, execution_policy.UsesFp16AttentionKv(),
+      QwenStateAbi(speculative, execution_policy.kv_cache_storage,
                    execution_policy.UsesBf16RecurrentState());
   std::ostringstream identity;
   identity << "schema=gufo-text-continuation-v2\n"
@@ -57,7 +57,10 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
            << "attention_split_count="
            << hip::detail::kSplitKDecodeAttentionMaxSplits << '\n'
            << "kv_storage="
-           << (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32") << '\n'
+           << (execution_policy.UsesQ8AttentionKv()
+                   ? "q8_0"
+                   : (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32"))
+           << '\n'
            << "recurrent_storage="
            << (execution_policy.UsesBf16RecurrentState() ? "bf16" : "fp32")
            << '\n'

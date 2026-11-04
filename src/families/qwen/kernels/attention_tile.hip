@@ -10,7 +10,9 @@
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
+#include "src/families/qwen/kernels/kv_read.hpp"
 #include "src/families/qwen/kernels/ops/attention.hpp"
+#include "src/families/qwen/kernels/ops/kv.hpp"
 
 namespace gufo::hip {
 
@@ -127,10 +129,11 @@ __global__ void PackTiledAttentionKvKernel(
   }
 }
 
+template<QwenKvFormat Format>
 __launch_bounds__(256, 3) __global__ void QwenTiledAttentionKernel(
     const float* __restrict__ q, const float* __restrict__ gate,
-    const __half* __restrict__ k_cache_f16,
-    const __half* __restrict__ v_cache_f16, float* __restrict__ out_context,
+    const void* __restrict__ k_cache,
+    const void* __restrict__ v_cache, float* __restrict__ out_context,
     std::uint32_t start_pos, std::size_t batch_size,
     float* __restrict__ lse_out, std::uint32_t key_begin) {
   const std::uint32_t lane = threadIdx.x;
@@ -146,7 +149,6 @@ __launch_bounds__(256, 3) __global__ void QwenTiledAttentionKernel(
       kTileAttentionQueryHeads * kTileAttentionHeadDim;
   constexpr std::size_t kv_width =
       kTileAttentionKvHeads * kTileAttentionHeadDim;
-  constexpr std::size_t kv_half2_stride = kv_width / 2;
   constexpr float attention_scale = 1.0F / 16.0F;
 
   __shared__ __half2 q_tile[kTileAttentionColumns][kTileAttentionHalf2Dim];
@@ -213,12 +215,12 @@ __launch_bounds__(256, 3) __global__ void QwenTiledAttentionKernel(
           __half2 packed =
               __halves2half2(__float2half_rn(0.0F), __float2half_rn(0.0F));
           if (key_position < context_end) {
-            const auto* layer_key =
-                reinterpret_cast<const __half2*>(k_cache_f16);
-            packed = layer_key
-                [(static_cast<std::size_t>(key_position) * kv_half2_stride) +
-                 (static_cast<std::size_t>(kv_head) * kTileAttentionHalf2Dim) +
-                 (key_dimension * kTileAttentionKeyHalf2Dim) + half2_index];
+            const std::size_t element =
+                (static_cast<std::size_t>(key_position) * kv_width) +
+                (static_cast<std::size_t>(kv_head) * kTileAttentionHeadDim) +
+                (key_dimension * kTileAttentionKeyHalf2Dim * 2) +
+                (2 * half2_index);
+            packed = detail::KvPlaneAt<Format>(k_cache, element).LoadHalf2(0);
           }
           kv_tile[(key_row * kTileAttentionKeyRowStride) + half2_index] =
               packed;
@@ -296,12 +298,11 @@ __launch_bounds__(256, 3) __global__ void QwenTiledAttentionKernel(
           __half2 packed =
               __halves2half2(__float2half_rn(0.0F), __float2half_rn(0.0F));
           if (key_position < context_end) {
-            const auto* layer_value =
-                reinterpret_cast<const __half2*>(v_cache_f16);
-            packed = layer_value
-                [(static_cast<std::size_t>(key_position) * kv_half2_stride) +
-                 (static_cast<std::size_t>(kv_head) * kTileAttentionHalf2Dim) +
-                 half2_index];
+            const std::size_t element =
+                (static_cast<std::size_t>(key_position) * kv_width) +
+                (static_cast<std::size_t>(kv_head) * kTileAttentionHeadDim) +
+                (2 * half2_index);
+            packed = detail::KvPlaneAt<Format>(v_cache, element).LoadHalf2(0);
           }
           kv_tile[(value_row * kTileAttentionHalf2Dim) + half2_index] = packed;
         }
@@ -407,9 +408,9 @@ __launch_bounds__(256, 3) __global__ void QwenTiledAttentionKernel(
 
 bool LaunchBatchedAttentionTile(
     const float* q, const float* k, const float* v, const float* gate,
-    float* k_cache, float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    float* out_context, std::uint32_t layer_idx, std::uint32_t start_pos,
-    std::size_t batch_size, std::uint32_t max_context, std::uint32_t num_heads,
+    float* k_cache, float* v_cache, QwenCompactKv compact, float* out_context,
+    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
+    std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t head_dim, hipStream_t stream,
     float* lse_out, std::uint32_t key_begin, bool skip_kv_write) {
   const detail::AttentionSupportParams support_params{
@@ -419,8 +420,8 @@ bool LaunchBatchedAttentionTile(
       .num_heads = num_heads,
       .num_kv_heads = num_kv_heads,
       .head_dim = head_dim,
-      .has_k_cache_f16 = k_cache_f16 != nullptr,
-      .has_v_cache_f16 = v_cache_f16 != nullptr,
+      .has_k_cache_f16 = compact.k != nullptr,
+      .has_v_cache_f16 = compact.v != nullptr,
   };
   if (!detail::IsTiledAttentionSupported(support_params)) {
     return false;
@@ -429,28 +430,33 @@ bool LaunchBatchedAttentionTile(
   constexpr std::size_t block_size = 256;
   constexpr std::size_t kv_width =
       kTileAttentionKvHeads * kTileAttentionHeadDim;
-  const std::size_t layer_cache_offset =
-      static_cast<std::size_t>(layer_idx) * max_context * kv_width;
-  auto* layer_k = static_cast<__half*>(k_cache_f16) + layer_cache_offset;
-  auto* layer_v = static_cast<__half*>(v_cache_f16) + layer_cache_offset;
   const dim3 pack_grid(
       static_cast<unsigned int>((kv_width + block_size - 1) / block_size),
       static_cast<unsigned int>(batch_size));
   if (!skip_kv_write && start_pos > 0 && k_cache != nullptr &&
-      v_cache != nullptr) {
+      v_cache != nullptr && compact.format == QwenKvFormat::kFp16) {
     const dim3 sync_grid(
         static_cast<unsigned int>((kv_width + block_size - 1) / block_size),
         static_cast<unsigned int>(start_pos));
     SyncTiledAttentionKvPrefixKernel<<<sync_grid, block_size, 0, stream>>>(
-        k_cache, v_cache, static_cast<__half*>(k_cache_f16),
-        static_cast<__half*>(v_cache_f16), layer_idx, start_pos, max_context,
+        k_cache, v_cache, static_cast<__half*>(compact.k),
+        static_cast<__half*>(compact.v), layer_idx, start_pos, max_context,
         num_kv_heads, head_dim);
   }
   if (!skip_kv_write) {
-    PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
-        k, v, static_cast<__half*>(k_cache_f16),
-        static_cast<__half*>(v_cache_f16), k_cache, v_cache, layer_idx,
-        start_pos, batch_size, max_context);
+    if (compact.format == QwenKvFormat::kQ8_0) {
+      LaunchEncodeQ8KvRows(k, v, compact.k, compact.v, layer_idx, start_pos,
+                           static_cast<std::uint32_t>(batch_size), max_context,
+                           static_cast<std::uint32_t>(kv_width), stream);
+    } else {
+      // The binary16 plane only exists for the FP16 format. The q8_0 plane
+      // is written by the encoder above.
+      const bool binary16_plane = compact.format == QwenKvFormat::kFp16;
+      PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
+          k, v, binary16_plane ? static_cast<__half*>(compact.k) : nullptr,
+          binary16_plane ? static_cast<__half*>(compact.v) : nullptr, k_cache,
+          v_cache, layer_idx, start_pos, batch_size, max_context);
+    }
   }
 
   const dim3 attention_grid(
@@ -459,9 +465,17 @@ bool LaunchBatchedAttentionTile(
       kTileAttentionKvHeads *
           (kTileAttentionGqa / kTileAttentionHeadsPerBlock));
   const dim3 attention_block(32, 8);
-  QwenTiledAttentionKernel<<<attention_grid, attention_block, 0, stream>>>(
-      q, gate, layer_k, layer_v, out_context, start_pos, batch_size, lse_out,
-      key_begin);
+  if (compact.format == QwenKvFormat::kQ8_0) {
+    QwenTiledAttentionKernel<QwenKvFormat::kQ8_0>
+        <<<attention_grid, attention_block, 0, stream>>>(
+            q, gate, compact.k, compact.v, out_context, start_pos, batch_size,
+            lse_out, key_begin);
+  } else {
+    QwenTiledAttentionKernel<QwenKvFormat::kFp16>
+        <<<attention_grid, attention_block, 0, stream>>>(
+            q, gate, compact.k, compact.v, out_context, start_pos, batch_size,
+            lse_out, key_begin);
+  }
   return true;
 }
 

@@ -168,6 +168,7 @@ private:
 
   void* d_kv_f32_{nullptr};
   void* d_kv_f16_{nullptr};
+  void* d_kv_q8_{nullptr};
   void* d_ssm_conv_{nullptr};
   void* d_ssm_deltanet_{nullptr};
   std::size_t kv_elements_per_plane_{0};
@@ -343,6 +344,9 @@ public:
   float* d_ssm_alpha_beta{nullptr};
   float* d_logits{nullptr};
   void* d_attention_kv_f16{nullptr};
+  // The q8_0 K/V cache. One binary16 scale and 32 signed codes per 32
+  // values, token-major like the FP16 plane. See docs/kv-codec.md.
+  void* d_attention_kv_q8{nullptr};
   float* d_kv_cache{nullptr};
   // Mirrors of the live recurrent buffers (see BeginRecurrentWrite); reassigned
   // whenever the live buffer changes, so snapshots and resets read and write
@@ -377,6 +381,32 @@ public:
     // Qwen27B reaches 2^32 elements per plane at context 262144.
     return static_cast<std::size_t>(config_.FullAttentionLayerCount()) *
            config_.num_key_value_heads * max_context_ * config_.head_dim;
+  }
+  /// The canonical K/V planes and the format they are stored in.
+  ///
+  /// The FP32 reference plane is a separate allocation and is not part of
+  /// this; the canonical plane holds the K rows first and the V rows after
+  /// them.
+  [[nodiscard]] QwenCompactKv CompactKv() const noexcept {
+    void* base = nullptr;
+    if (policy_.UsesFp16AttentionKv()) {
+      base = d_attention_kv_f16;
+    } else if (policy_.UsesQ8AttentionKv()) {
+      base = d_attention_kv_q8;
+    }
+    if (base == nullptr) {
+      return {};
+    }
+    const std::size_t plane_bytes =
+        QwenKvRowBytes(policy_.kv_cache_storage,
+                       config_.num_key_value_heads * config_.head_dim) *
+        static_cast<std::size_t>(max_context_) *
+        config_.FullAttentionLayerCount();
+    return {
+        .k = base,
+        .v = static_cast<std::byte*>(base) + plane_bytes,
+        .format = QwenKvFormatFor(policy_.kv_cache_storage),
+    };
   }
   [[nodiscard]] QwenRecurrentStateStorage GetRecurrentStateStorage()
       const noexcept {

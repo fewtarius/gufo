@@ -796,7 +796,7 @@ std::span<const std::byte> ContinuationAdapter::BorrowRowsView(
     throw std::invalid_argument("invalid Qwen borrowed range");
   // FP32 planes are head-major, so a token range is not contiguous. Its
   // canonical host representation still goes through TransferRows.
-  if (!policy_.UsesFp16AttentionKv())
+  if (!hip::QwenKvCacheIsTokenMajor(policy_.kv_cache_storage))
     return {};
   Check(hipStreamSynchronize(state.executor->arena_.stream));
   const auto& c = model_->GetConfig();
@@ -805,8 +805,12 @@ std::span<const std::byte> ContinuationAdapter::BorrowRowsView(
   const auto plane = component.part == ContinuationPart::kValue
                          ? c.FullAttentionLayerCount()
                          : 0;
+  const auto& arena = state.executor->arena_;
+  const void* base = policy_.UsesQ8AttentionKv()
+                         ? static_cast<const void*>(arena.d_attention_kv_q8)
+                         : static_cast<const void*>(arena.d_attention_kv_f16);
   return {
-      static_cast<const std::byte*>(state.executor->arena_.d_attention_kv_f16) +
+      static_cast<const std::byte*>(base) +
           ((plane + layer) * std::size_t{context_} + first) * row,
       (end - first) * row};
 }
@@ -820,16 +824,18 @@ cache::Completion ContinuationAdapter::TransferRows(
   const std::size_t plane = component.part == ContinuationPart::kValue
                                 ? c.FullAttentionLayerCount()
                                 : 0;
-  auto* native =
-      static_cast<std::byte*>(policy_.UsesFp16AttentionKv()
-                                  ? arena.d_attention_kv_f16
-                                  : static_cast<void*>(arena.d_kv_cache)) +
+  auto* native = static_cast<std::byte*>(
+      policy_.UsesQ8AttentionKv()
+          ? static_cast<void*>(arena.d_attention_kv_q8)
+          : policy_.UsesFp16AttentionKv()
+              ? static_cast<void*>(arena.d_attention_kv_f16)
+              : static_cast<void*>(arena.d_kv_cache)) +
       (plane + layer) * context_ * row;
   return Transfer(state, load, stream, [&](hip::TransferStream& transfer) {
     if (first == end)
       return;
     const auto direction = load ? hipMemcpyDefault : hipMemcpyDeviceToHost;
-    if (policy_.UsesFp16AttentionKv()) {
+    if (hip::QwenKvCacheIsTokenMajor(policy_.kv_cache_storage)) {
       auto* device = native + first * row;
       Check(load ? hip::CopySnapshotToDevice(device, bytes, (end - first) * row,
                                              transfer.Native())

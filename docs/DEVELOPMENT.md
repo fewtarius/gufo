@@ -176,7 +176,7 @@ hosted selection is described in [testing](TESTING.md).
 - Prefer `jj` when available (`jj version`); otherwise use Git.
 - Follow Conventional Commits with a single-line message. Pull request titles
   must follow the types and version effects in the [release policy](RELEASING.md);
-  the squash merge retains the title as the commit on `main`.
+  the squash merge retains the title as the commit on `unstable`.
 - Use `gh` for GitHub operations after checking `gh auth status`.
 - Preserve unrelated work and stage only task-owned paths before Nix builds.
 
@@ -187,6 +187,6 @@ hosted selection is described in [testing](TESTING.md).
 [performance](PERFORMANCE.md), [benchmarking](BENCHMARKS.md) and
 [models](models/README.md).
 
-The production package ships the HIP backend only. Experimental accelerator work
-remains on `perf/qwen27b-dflash2-npu`; offline quantization research remains in
-PR #234. Neither toolchain is required to install or run main.
+The production package ships the HIP backend only. Neither experimental
+accelerator work nor offline quantization research is required to install or
+run the fork.

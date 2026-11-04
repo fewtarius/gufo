@@ -37,10 +37,17 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
 cmake --build build --parallel
 ```
 
-Or through the fork's own wrapper, which sets the ROCm paths:
+Or through the fork's own wrapper, if present, which sets the ROCm paths:
 
 ```sh
-../src/llama-gufo/build.sh
+../scripts/env.sh rocm
+cmake --build build --parallel
+```
+
+Otherwise use the standard build documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md):
+
+```sh
+nix build .#release
 ```
 
 ## How to run

@@ -1,12 +1,18 @@
 # Laguna S 2.1 Port State
 
-## Active Branch & Model Target
-- **Branch:** `feat/laguna` (worktree at `~/gufo-laguna`)
+> This file is a historical record of the port process. Current performance
+> numbers, quality checks, and configuration are in [README.md](../../../docs/models/laguna/README.md),
+> [BENCHMARKS.md](../../../docs/models/laguna/BENCHMARKS.md), [QUALITY.md](../../../docs/models/laguna/QUALITY.md), and
+> [EXPERIMENTS.md](../../../docs/models/laguna/EXPERIMENTS.md). The port is complete; this file is kept
+> for context on how decisions were reached.
+
+## Branch & Model Target
+- **Branch:** `unstable` (merged from the original `feat/laguna` work)
 - **Model:** 3-shard Unsloth Laguna S 2.1
 - **GGUF Path:** `~/models/laguna-s-2.1-unsloth/UD-Q4_K_M/Laguna-S-2.1-UD-Q4_K_M-00001-of-00003.gguf`
-- **DFlash drafter:** `~/models/laguna-s-2.1/laguna-s-2.1-DFlash-BF16.gguf` (on disk, NOT wired into the engine yet)
+- **DFlash drafter:** `~/models/laguna-s-2.1/laguna-s-2.1-DFlash-BF16.gguf`
 
-## Files touched this session (uncommitted, branch `feat/laguna`)
+## Files touched during the port
 - `src/models/laguna/gpu/kernels/kernels.hip.cpp`: templated group-6/group-9
   WMMA attention kernel + dispatch; new `RouterGemmKernel` + dispatch.
 - `src/models/laguna/gpu/engine.cpp`: WMMA call site trusts `AttentionWmma`'s

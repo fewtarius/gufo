@@ -839,6 +839,10 @@ void mul_mat_vec_moe_dispatch(const void* weights, ggml_type type,
             launch_moe<GGML_TYPE_Q5_K>(weights, input, ids, output, k, rows, tokens,
                                           experts_used, input_stride, stream);
             break;
+        case GGML_TYPE_Q6_K:
+            launch_moe<GGML_TYPE_Q6_K>(weights, input, ids, output, k, rows, tokens,
+                                          experts_used, input_stride, stream);
+            break;
         default: GGML_ABORT("unsupported vector weight format");
     }
 }

@@ -7,6 +7,7 @@
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/ops.hpp"
 #include "src/models/qwen/hip/executor.hpp"
+#include "src/models/qwen/hip/moe_ffn.hpp"
 #include "src/models/qwen/modules/modules.hpp"
 
 namespace gufo::hip {
@@ -230,10 +231,19 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       // same down GEMV as the former inline calls; behavior identical. The
       // module reads the arena device spans (x = d_normed, act_scratch =
       // d_ffn_act, out = d_ffn_out) directly.
-      const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
-      gufo::models::qwen::FfnForward(
-          module_ctx, ffn_view, decode_scratch.normed, ffn_scratch.activation,
-          ffn_scratch.activation, ffn_scratch.activation, ffn_scratch.out);
+      if (config.IsMoe()) {
+        // A routed feed-forward: the router picks the experts on the device
+        // and their outputs are combined with the shared expert's.
+        MoeFfnToken(layer, config, scratch.moe, 0,
+                    decode_scratch.normed.data(), ffn_scratch.out.data(),
+                    arena.stream);
+      } else {
+        const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
+        gufo::models::qwen::FfnForward(
+            module_ctx, ffn_view, decode_scratch.normed,
+            ffn_scratch.activation, ffn_scratch.activation,
+            ffn_scratch.activation, ffn_scratch.out);
+      }
     }
 
     // Residual Add

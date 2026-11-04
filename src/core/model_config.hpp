@@ -33,6 +33,30 @@ struct ModelConfig {
   float rope_scale{1.0F};
   bool is_text_only{true};
 
+  /// Mixture-of-experts feed-forward. Zero for a dense model.
+  ///
+  /// A MoE model carries no feed_forward_length: the width of its
+  /// feed-forward is the expert width, and there are two of them - one
+  /// for the routed experts and one for the shared expert.
+  std::uint32_t num_experts{0};
+  std::uint32_t num_experts_used{0};
+  std::uint32_t expert_ff{0};
+  std::uint32_t shared_expert_ff{0};
+
+  [[nodiscard]] constexpr bool IsMoe() const noexcept {
+    return num_experts > 0;
+  }
+
+  /// The width of the feed-forward this model actually runs. A dense
+  /// model uses its own intermediate size; a MoE model runs one expert
+  /// at a time, so the wider of the two expert widths is the bound.
+  [[nodiscard]] constexpr std::uint32_t FeedForwardWidth() const noexcept {
+    if (!IsMoe()) {
+      return intermediate_size;
+    }
+    return expert_ff > shared_expert_ff ? expert_ff : shared_expert_ff;
+  }
+
   [[nodiscard]] constexpr std::uint32_t AttentionSize() const noexcept {
     return num_attention_heads * head_dim;
   }
@@ -67,7 +91,7 @@ struct ModelConfig {
   /// block structure.
   [[nodiscard]] constexpr bool IsValidQwen() const noexcept {
     return head_dim > 0 && num_layers > 0 && hidden_size > 0 &&
-           intermediate_size > 0 && num_attention_heads > 0 &&
+           FeedForwardWidth() > 0 && num_attention_heads > 0 &&
            num_key_value_heads > 0 && vocab_size > 0 &&
            full_attention_interval == 4 &&
            (num_layers % full_attention_interval) == 0 && rotary_dim > 0 &&
@@ -75,7 +99,10 @@ struct ModelConfig {
            ssm_conv_kernel == 4 && ssm_state_size == 128 &&
            ssm_group_count > 0 && ssm_time_step_rank > 0 &&
            ssm_inner_size > 0 && (ssm_inner_size % ssm_time_step_rank) == 0 &&
-           SsmValueSize() == 128 && is_text_only;
+           SsmValueSize() == 128 && is_text_only &&
+           (!IsMoe() || (num_experts_used > 0 &&
+                         num_experts_used <= num_experts &&
+                         expert_ff > 0 && shared_expert_ff > 0));
   }
 };
 

@@ -229,6 +229,24 @@ struct QwenFfnScratch {
   std::span<float> out;
 };
 
+/// Device scratch of the mixture-of-experts feed-forward.
+///
+/// Every span is [rows] wide, so the same scratch serves one decode token
+/// and a batch of verification rows. The router logits and the shared
+/// expert's gate are per row; the routed experts own one activation row
+/// and one output row per selected expert.
+struct QwenMoeScratch {
+  std::span<float> router_logits;
+  std::span<float> shared_logit;
+  std::span<std::int32_t> ids;
+  std::span<float> weights;
+  std::span<float> shared_weight;
+  std::span<float> act;
+  std::span<float> down_out;
+  std::span<float> shared_act;
+  std::span<float> shared_out;
+};
+
 /// Typed non-owning capability views over stable Qwen GPU arena allocations.
 /// The nested aggregates carry element counts without owning memory or changing
 /// any address used by kernels or graph capture.
@@ -237,12 +255,14 @@ struct QwenGpuScratchView {
   QwenAttentionScratch attention;
   QwenSsmScratch ssm;
   QwenFfnScratch ffn;
+  QwenMoeScratch moe;
 };
 
 static_assert(std::is_trivially_copyable_v<QwenDecodeScratch>);
 static_assert(std::is_trivially_copyable_v<QwenAttentionScratch>);
 static_assert(std::is_trivially_copyable_v<QwenSsmScratch>);
 static_assert(std::is_trivially_copyable_v<QwenFfnScratch>);
+static_assert(std::is_trivially_copyable_v<QwenMoeScratch>);
 static_assert(std::is_trivially_copyable_v<QwenGpuScratchView>);
 static_assert(std::is_same_v<decltype(QwenDecodeScratch::sampled_token),
                              std::span<std::uint32_t>>);
@@ -339,6 +359,13 @@ public:
   float* d_split_k_attention{nullptr};
   hip_bfloat16* d_weights_bf16{nullptr};
   void* d_scratch_q8_act{nullptr};
+  // The mixture-of-experts feed-forward scratch, split into spans by
+  // GetScratchView. Null for a dense model.
+  void* d_moe_buf{nullptr};
+
+  /// The row count the mixture-of-experts scratch is sized for. One decode
+  /// token uses one row; a batch of verification rows uses one each.
+  static constexpr std::uint32_t kMoeScratchRows = 64;
 
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;
@@ -369,6 +396,9 @@ public:
   void RestoreSnapshot(const QwenGpuSnapshot& snapshot);
   void RestoreCompactSnapshot(std::span<const std::uint8_t> payload,
                               std::uint32_t expected_valid_context);
+  /// The mixture-of-experts scratch, split out of the arena's single
+  /// allocation. Empty for a dense model.
+  [[nodiscard]] QwenMoeScratch MoeScratchView() noexcept;
   [[nodiscard]] QwenGpuScratchView GetScratchView(
       std::size_t batch_size = 1) noexcept;
   void SetTargetLayerCapture(std::span<const std::uint32_t> target_layer_ids);

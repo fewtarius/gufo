@@ -10,6 +10,7 @@
 #include "src/families/qwen/kernels/ops.hpp"
 #include "src/families/qwen/kernels/ops/prefill_fp16.hpp"
 #include "src/models/qwen/hip/executor.hpp"
+#include "src/models/qwen/hip/moe_ffn.hpp"
 
 namespace gufo::hip {
 namespace {
@@ -543,6 +544,21 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
     const void* ffn_down_q8_act = arena_.d_scratch_q8_act;
     const void* ffn_down_input = arena_.d_scratch_bf16;
 
+    if (config.IsMoe()) {
+      // A routed feed-forward. The router runs per token, so the chunk is
+      // walked one token at a time; the attention above stayed batched.
+      const auto moe_scratch = arena_.MoeScratchView();
+      for (std::size_t row = 0; row < batch_size; ++row) {
+        MoeFfnToken(layer, config, moe_scratch,
+                    static_cast<std::uint32_t>(row),
+                    arena_.d_normed + (row * hidden_size),
+                    arena_.d_ffn_out + (row * hidden_size), arena_.stream);
+      }
+      LaunchBatchedResidualAdd(arena_.d_hidden, arena_.d_ffn_out,
+                               arena_.d_hidden, batch_size, hidden_size,
+                               arena_.stream);
+    } else {
+
     {
       if (!half_prefill && !ffn_feeds_q8_only) {
         LaunchQuantizeActivationQ8_1(arena_.d_scratch_bf16,
@@ -638,6 +654,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                                arena_.d_hidden, batch_size, hidden_size,
                                arena_.stream);
     }
+    }  // the dense feed-forward
 
     if (capture_prompt_hidden_) {
       if (const auto tap_index = arena_.GetTargetLayerCaptureIndex(l);

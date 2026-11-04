@@ -60,6 +60,29 @@ std::optional<core::ModelConfig> ExtractQwenConfig(
   if (auto val = reader.GetMetadataUint32(prefix + "ssm.inner_size")) {
     config.ssm_inner_size = *val;
   }
+  // A MoE model has no feed_forward_length: its feed-forward is the
+  // expert width. There are two of them, one for the routed experts
+  // and one for the shared expert.
+  if (auto val = reader.GetMetadataUint32(prefix + "expert_count")) {
+    config.num_experts = *val;
+  }
+  if (auto val = reader.GetMetadataUint32(prefix + "expert_used_count")) {
+    config.num_experts_used = *val;
+  }
+  if (auto val = reader.GetMetadataUint32(prefix + "expert_feed_forward_length")) {
+    config.expert_ff = *val;
+  }
+  if (auto val =
+          reader.GetMetadataUint32(prefix + "expert_shared_feed_forward_length")) {
+    config.shared_expert_ff = *val;
+  }
+  // A MoE model has no dense feed-forward, so the intermediate size
+  // stays at its default and the scratch the arena sizes from it would
+  // be the default rather than the model's. Point it at the expert
+  // width, which is the feed-forward a MoE layer actually runs.
+  if (config.IsMoe()) {
+    config.intermediate_size = config.expert_ff;
+  }
   if (auto val = reader.GetMetadataFloat32(prefix + "rope.freq_base")) {
     config.rope_theta = *val;
   }

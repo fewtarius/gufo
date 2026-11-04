@@ -786,6 +786,20 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
     HIP_CHECK(
         hipMalloc(&d_split_k_attention, split_k_elements * sizeof(float)));
 
+    // The mixture-of-experts feed-forward scratch: one row per decode
+    // token or verification row.
+    if (config_.IsMoe()) {
+      const std::size_t experts = config_.num_experts;
+      const std::size_t used = config_.num_experts_used;
+      const std::size_t expert_ff = config_.expert_ff;
+      const std::size_t shared_ff = config_.shared_expert_ff;
+      const std::size_t rows = kMoeScratchRows;
+      const std::size_t floats =
+          rows * (experts + 1 + used + used + 1 + (used * expert_ff) +
+                  (used * hidden_size) + shared_ff + hidden_size);
+      HIP_CHECK(hipMalloc(&d_moe_buf, floats * sizeof(float)));
+    }
+
     // Weight BF16 scratch: largest per-layer matmul weight in bf16 elements,
     // used by the prefill dequant-to-BF16 then BF16 GEMM path.
     const std::size_t max_weight_elems =
@@ -913,6 +927,47 @@ QwenGpuScratchView QwenGpuArena::GetScratchView(
               .activation = {d_ffn_act, batch * config_.intermediate_size},
               .out = {d_ffn_out, batch * hidden},
           },
+      .moe = MoeScratchView(),
+  };
+}
+
+/// The mixture-of-experts scratch, split out of the arena's single
+/// allocation. Empty for a dense model.
+QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
+  if (d_moe_buf == nullptr) {
+    return {};
+  }
+  const std::size_t rows = kMoeScratchRows;
+  const std::size_t experts = config_.num_experts;
+  const std::size_t used = config_.num_experts_used;
+  const std::size_t expert_ff = config_.expert_ff;
+  const std::size_t shared_ff = config_.shared_expert_ff;
+  const std::size_t hidden = config_.hidden_size;
+  auto* cursor = static_cast<float*>(d_moe_buf);
+  const auto take = [&cursor](std::size_t count) {
+    float* start = cursor;
+    cursor += count;
+    return start;
+  };
+  auto* router_logits = take(rows * experts);
+  auto* shared_logit = take(rows);
+  auto* ids = reinterpret_cast<std::int32_t*>(take(rows * used));
+  auto* weights = take(rows * used);
+  auto* shared_weight = take(rows);
+  auto* act = take(rows * used * expert_ff);
+  auto* down_out = take(rows * used * hidden);
+  auto* shared_act = take(rows * shared_ff);
+  auto* shared_out = take(rows * hidden);
+  return {
+      .router_logits = {router_logits, rows * experts},
+      .shared_logit = {shared_logit, rows},
+      .ids = {ids, rows * used},
+      .weights = {weights, rows * used},
+      .shared_weight = {shared_weight, rows},
+      .act = {act, rows * used * expert_ff},
+      .down_out = {down_out, rows * used * hidden},
+      .shared_act = {shared_act, rows * shared_ff},
+      .shared_out = {shared_out, rows * hidden},
   };
 }
 
@@ -977,6 +1032,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   d_scratch_q8_act = other.d_scratch_q8_act;
   d_split_k_attention = other.d_split_k_attention;
   d_weights_bf16 = other.d_weights_bf16;
+  d_moe_buf = other.d_moe_buf;
   d_ssm_conv_buffers_ = other.d_ssm_conv_buffers_;
   d_ssm_deltanet_buffers_ = other.d_ssm_deltanet_buffers_;
   live_recurrent_ = other.live_recurrent_;
@@ -1024,6 +1080,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   other.d_scratch_q8_act = nullptr;
   other.d_split_k_attention = nullptr;
   other.d_weights_bf16 = nullptr;
+  other.d_moe_buf = nullptr;
   other.d_ssm_conv_buffers_ = {};
   other.d_ssm_deltanet_buffers_ = {};
   other.live_recurrent_ = 0;
@@ -1081,6 +1138,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     d_scratch_q8_act = other.d_scratch_q8_act;
     d_split_k_attention = other.d_split_k_attention;
     d_weights_bf16 = other.d_weights_bf16;
+    d_moe_buf = other.d_moe_buf;
     d_ssm_conv_buffers_ = other.d_ssm_conv_buffers_;
     d_ssm_deltanet_buffers_ = other.d_ssm_deltanet_buffers_;
     live_recurrent_ = other.live_recurrent_;
@@ -1128,6 +1186,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     other.d_scratch_q8_act = nullptr;
     other.d_split_k_attention = nullptr;
     other.d_weights_bf16 = nullptr;
+    other.d_moe_buf = nullptr;
     other.d_ssm_conv_buffers_ = {};
     other.d_ssm_deltanet_buffers_ = {};
     other.live_recurrent_ = 0;
@@ -1246,6 +1305,8 @@ void QwenGpuArena::FreeAll() noexcept {
     LogCleanupError(hipFree(d_split_k_attention));
   if (d_weights_bf16 != nullptr)
     LogCleanupError(hipFree(d_weights_bf16));
+  if (d_moe_buf != nullptr)
+    LogCleanupError(hipFree(d_moe_buf));
   if (d_ssm_replay_qkv_ != nullptr)
     LogCleanupError(hipFree(d_ssm_replay_qkv_));
   if (d_ssm_replay_alpha_ != nullptr)

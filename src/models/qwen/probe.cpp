@@ -11,6 +11,13 @@ bool ProbeQwenGguf(const core::GgufReader& reader) {
   if (architecture == "deepseek4" || architecture == "qwen4exp") {
     return false;
   }
+  // The MoE variant of the Qwen3.5 block: the same attention and
+  // recurrent structure with a routed feed-forward. It is a narrower
+  // model, so its embedding length is its own.
+  if (architecture == "qwen35moe") {
+    return reader.GetMetadataUint64("qwen35moe.embedding_length")
+               .value_or(0) == 2048;
+  }
   if (architecture != "qwen" && architecture != "qwen2" &&
       architecture != "qwen35" && architecture != "qwen38") {
     return false;

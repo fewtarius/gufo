@@ -54,8 +54,8 @@ nix build .#release
 
 ```sh
 gufo serve llm --host 0.0.0.0 --port 9090 \
-  --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf \
-  --speculative dflash2 --dflash-model Laguna-S-2.1-DFlash-BF16-gufo.gguf -d 2
+  --model Laguna-S-2.1-UD-Q4_K_M.gguf \
+  --speculative dflash2 --dflash-model Laguna-S-2.1-DFlash-BF16.gguf -d 2
 ```
 
 `LAGUNA_KV_CACHE_TYPE=q8_0` stores the attention K/V cache as q8_0 instead of
@@ -73,7 +73,7 @@ src/models/laguna/
   provider.cpp          registers the provider with ext::Registry
   probe.cpp             recognises a Laguna GGUF
   runner.cpp            the ext::TextModelRunner implementation
-  runner_body.inc       the runner body, kept separate for reviewability
+  runner.hpp            the runner header
   drivers.cpp           the bench, prompt and chat CLI drivers
   runtime/config.cpp    the GGUF config parser
   chat_template.cpp     the chat template
@@ -93,7 +93,7 @@ small and self-contained:
 | `src/ext/text.hpp` | A `prefill_grid_tokens` capability, so a model whose prefill chunks are wider than the default aligns its checkpoints to them. Upstream hardcodes 2048. The dialect contract also carries the per-argument and per-call scan offsets the recovery path needs. |
 | `src/cli/serve/text_model_runner.cpp` | Consumes that capability. |
 | `src/cli/serve/openai_chat.cpp` | The Laguna parser reaches the model's scanner through the dialect contract instead of naming the model. |
-| `src/models/qwen/hip/dflash/{dflash.hpp,executor.cpp,model.cpp}` | Device-side target-context injection, a rewind of the injected frontier, a persistent snapshot of that frontier, and a creation overload for a target that is not a `QwenGpuModel`. |
+| `src/models/qwen/hip/dflash.hpp`, `src/models/qwen/hip/dflash/{executor.cpp,model.cpp}` | Device-side target-context injection, a rewind of the injected frontier, a persistent snapshot of that frontier, and a creation overload for a target that is not a `QwenGpuModel`. |
 | `src/models/qwen/dflash_weights.{hpp,cpp}` | DFlash v1 support, which upstream dropped. The Laguna drafter is a v1 model. |
 | `src/families/qwen/kernels/dflash_kernels.{hpp,hip}` | The v1 attention gate and the per-tap RMSNorm. |
 | `src/families/qwen/text/tokenizer.{hpp,cpp}` | The Laguna control tokens and the Laguna pre-tokenizer, both of which upstream's tokenizer rewrite dropped. |

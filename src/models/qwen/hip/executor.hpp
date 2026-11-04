@@ -683,6 +683,10 @@ private:
   std::optional<tokenization::TokenId> next_token_;
   bool capture_prompt_hidden_{false};
   bool replaying_ssm_state_{false};
+  /// The mixture-of-experts kernels have been warmed once outside the graph
+  /// capture, so the matrix library's workspace pool is sized before the
+  /// decode graph is captured.
+  bool moe_warmed_{false};
 };
 
 }  // namespace gufo::hip

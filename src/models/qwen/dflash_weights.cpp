@@ -170,15 +170,46 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   if (!hidden_size || !intermediate_size || !num_attention_heads ||
       !num_key_value_heads || !head_dim || !rotary_dim || !context_length ||
       !num_layers || !rope_theta) {
-    if (!rotary_dim) {
-      SetError(error_msg,
-               "DFlash-2 GGUF requires a valid rotary dimension or "
-               "degenerate four-section M-RoPE layout");
+    std::string missing;
+    const auto note_missing = [&missing](std::string_view key) {
+      if (!missing.empty()) {
+        missing += ", ";
+      }
+      missing += key;
+    };
+    if (!hidden_size) {
+      note_missing(prefix + "embedding_length");
+    }
+    if (!intermediate_size) {
+      note_missing(prefix + "feed_forward_length");
+    }
+    if (!num_attention_heads) {
+      note_missing(prefix + "attention.head_count");
+    }
+    if (!num_key_value_heads) {
+      note_missing(prefix + "attention.head_count_kv");
+    }
+    if (!head_dim) {
+      note_missing(prefix + "attention.key_length");
+    }
+    if (!context_length) {
+      note_missing(prefix + "context_length");
+    }
+    if (!num_layers) {
+      note_missing(prefix + "block_count");
     }
     if (!rope_theta) {
-      SetError(
-          error_msg,
-          "DFlash-2 GGUF is missing required metadata 'dflash.rope.freq_base'");
+      note_missing(prefix + "rope.freq_base");
+    }
+    if (!rotary_dim) {
+      note_missing(prefix + "rope.dimension_count");
+      SetError(error_msg,
+               "DFlash GGUF requires a valid rotary dimension or degenerate "
+               "four-section M-RoPE layout; missing required metadata: " +
+               missing);
+    } else {
+      SetError(error_msg,
+               "DFlash GGUF is missing required metadata: " + missing);
     }
     return std::nullopt;
   }
@@ -227,11 +258,27 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   const auto is_causal = reader.GetMetadataBool(prefix + "attention.causal");
   if (!block_size || !sliding_window || !mask_token_id ||
       !is_causal.has_value()) {
-    if (!is_causal.has_value()) {
-      SetError(error_msg,
-               "DFlash GGUF is missing required metadata "
-               "'dflash.attention.causal'");
+    std::string missing;
+    const auto note_missing = [&missing](std::string_view key) {
+      if (!missing.empty()) {
+        missing += ", ";
+      }
+      missing += key;
+    };
+    if (!block_size) {
+      note_missing(prefix + "block_size");
     }
+    if (!sliding_window) {
+      note_missing(prefix + "attention.sliding_window");
+    }
+    if (!mask_token_id) {
+      note_missing(prefix + "mask_token_id");
+    }
+    if (!is_causal.has_value()) {
+      note_missing(prefix + "attention.causal");
+    }
+    SetError(error_msg,
+             "DFlash GGUF is missing required metadata: " + missing);
     return std::nullopt;
   }
 

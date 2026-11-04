@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "src/core/diagnostics/fingerprint.h"
+#include "src/core/diagnostics/gpu_architecture.h"
 #include "src/core/json.hpp"
 
 namespace gufo::diagnostics {
@@ -89,7 +90,11 @@ ValidationResult ValidateArtifactContent(std::string_view content) {
     const auto check_architecture = [&](const json::Value& object) {
       if (object.contains("gpuArchitecture")) {
         const auto arch = String(object, "gpuArchitecture");
-        if (!arch.empty() && arch != "gfx1151")
+        // An artifact records the architecture that produced it. The
+        // validator only checks that gufo supports that architecture; the
+        // fingerprint id carries the full machine identity, so a mismatched
+        // machine is rejected by the fingerprint comparison instead.
+        if (!arch.empty() && !IsSupportedGpuArchitecture(arch))
           fail("Incompatible GPU architecture: " + arch);
       }
     };

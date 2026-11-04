@@ -233,7 +233,9 @@ tokenization::TokenId QwenMtpGpuExecutor::Run(tokenization::TokenId input_token,
              stream_, vision_input_ ? vision_input_->rope() : nullptr);
   LaunchAttention(
       d_q_, d_k_, d_v_, d_gate_, d_kv_cache_, d_kv_cache_ + total_kv,
-      d_kv_cache_f16_, static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
+      QwenCompactKv{d_kv_cache_f16_,
+                    static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
+                    QwenKvFormat::kFp16},
       d_context_, 0, position, max_context_, config.num_attention_heads,
       config.num_key_value_heads, config.head_dim, stream_, d_split_k_scratch_);
   LaunchGEMV(layer.attn_output.data, layer.attn_output.type, d_context_,

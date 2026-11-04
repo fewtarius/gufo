@@ -35,9 +35,11 @@ namespace {
 ///
 /// A compiled pattern is immutable and safe to match from several threads;
 /// only the cache lookup needs the lock.
-std::shared_ptr<const icu::RegexPattern> CachedRegexPattern(const char* pattern) {
+std::shared_ptr<const icu::RegexPattern> CachedRegexPattern(
+    const char* pattern) {
   static std::mutex cache_mutex;
-  static std::unordered_map<std::string, std::shared_ptr<const icu::RegexPattern>>
+  static std::unordered_map<std::string,
+                            std::shared_ptr<const icu::RegexPattern>>
       cache;
   const std::string key(pattern);
   {
@@ -49,9 +51,8 @@ std::shared_ptr<const icu::RegexPattern> CachedRegexPattern(const char* pattern)
   }
   UErrorCode status = U_ZERO_ERROR;
   UParseError parse_error;
-  std::shared_ptr<icu::RegexPattern> compiled(
-      icu::RegexPattern::compile(icu::UnicodeString::fromUTF8(pattern),
-                                 parse_error, status));
+  std::shared_ptr<icu::RegexPattern> compiled(icu::RegexPattern::compile(
+      icu::UnicodeString::fromUTF8(pattern), parse_error, status));
   if (U_FAILURE(status) || compiled == nullptr) {
     throw std::runtime_error("could not compile the pre-tokenizer regex");
   }

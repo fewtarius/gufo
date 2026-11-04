@@ -60,9 +60,9 @@ int main() {
       Check(!call.complete, "unterminated value is not complete");
       Check(call.arguments.size() == 1, "the well-formed argument survived");
       if (call.arguments.size() == 1) {
-        Check(call.arguments[0].name == "good" &&
-                  call.arguments[0].value == "ok",
-              "the well-formed argument is intact");
+        Check(
+            call.arguments[0].name == "good" && call.arguments[0].value == "ok",
+            "the well-formed argument is intact");
       }
     }
   }

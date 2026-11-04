@@ -9,6 +9,7 @@
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/attention_decode_split_k.hpp"
 #include "src/families/qwen/kernels/attention_decode_verify_wave64.hpp"
+#include "src/families/qwen/kernels/kv_read.hpp"
 
 namespace gufo::hip::detail {
 namespace {
@@ -18,10 +19,11 @@ namespace {
 // arithmetic and scratch layout are SplitKAttentionHead's, as in
 // QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>; the score tree
 // runs on DPP row exchanges because a 16-lane head is one DPP row.
+template<QwenKvFormat Format>
 __launch_bounds__(192) __global__
     void QwenVerifySplitKAttentionHalfPartialsWave64Kernel(
-        const float* __restrict__ q, const __half* __restrict__ k_cache,
-        const __half* __restrict__ v_cache, float* __restrict__ scratch,
+        const float* __restrict__ q, const void* __restrict__ k_cache,
+        const void* __restrict__ v_cache, float* __restrict__ scratch,
         std::uint32_t layer_idx, std::uint32_t pos, std::uint32_t max_context,
         std::uint32_t num_heads, std::uint32_t num_kv_heads,
         std::uint32_t split_count) {
@@ -63,7 +65,7 @@ __launch_bounds__(192) __global__
 
   Head state;
   state.LoadQuery(query, lane);
-  const auto accumulate = [&](const __half* key, const __half* value) {
+  const auto accumulate = [&](const auto& key, const auto& value) {
     const float score = RowSumDpp(state.Partial(key, lane)) * scale;
     state.Accumulate(score, value, lane);
   };
@@ -80,8 +82,8 @@ __launch_bounds__(192) __global__
     // Tiles are consecutive tokens: one wave-uniform base per tile keeps
     // each thread's offset at 32 bits.
     const std::size_t tile_offset = cache_block_offset + begin * kv_width;
-    const __half* key_tile = k_cache + tile_offset;
-    const __half* value_tile = v_cache + tile_offset;
+    const auto key_tile = KvPlaneAt<Format>(k_cache, tile_offset);
+    const auto value_tile = KvPlaneAt<Format>(v_cache, tile_offset);
     for (unsigned vector = threadIdx.x; vector < count * vectors_per_token;
          vector += heads_per_block * lanes) {
       const unsigned token = vector / vectors_per_token;
@@ -90,15 +92,14 @@ __launch_bounds__(192) __global__
       __half* key_slot = keys[element / head_dim][token] + (element % head_dim);
       __half* value_slot =
           values[element / head_dim][token] + (element % head_dim);
-      *reinterpret_cast<uint4*>(key_slot) =
-          *reinterpret_cast<const uint4*>(key_tile + offset);
-      *reinterpret_cast<uint4*>(value_slot) =
-          *reinterpret_cast<const uint4*>(value_tile + offset);
+      *reinterpret_cast<uint4*>(key_slot) = key_tile.LoadHalf8(offset);
+      *reinterpret_cast<uint4*>(value_slot) = value_tile.LoadHalf8(offset);
     }
     __syncthreads();
 #pragma unroll 1
     for (unsigned token = 0; token < count; ++token) {
-      accumulate(keys[local_kv][token], values[local_kv][token]);
+      accumulate(KvPlane<QwenKvFormat::kFp16>(keys[local_kv][token]),
+                 KvPlane<QwenKvFormat::kFp16>(values[local_kv][token]));
     }
     __syncthreads();
   }
@@ -107,19 +108,33 @@ __launch_bounds__(192) __global__
 
 }  // namespace
 
+template<QwenKvFormat Format>
 void LaunchVerifySplitKAttentionHalfPartialsWave64(
-    const float* q, const __half* k_cache, const __half* v_cache,
-    float* scratch, std::uint32_t layer_idx, std::uint32_t start_pos,
-    unsigned rows, std::uint32_t max_context, std::uint32_t num_heads,
+    const float* q, const void* k_cache, const void* v_cache, float* scratch,
+    std::uint32_t layer_idx, std::uint32_t start_pos, unsigned rows,
+    std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t splits, hipStream_t stream) {
   assert(num_kv_heads % 2 == 0 && "wave64 verification pairs KV heads");
   assert(num_heads == 6 * num_kv_heads && "twelve query heads per block");
   assert(rows > 1 && "single rows keep the 32-lane kernel");
-  QwenVerifySplitKAttentionHalfPartialsWave64Kernel<<<
+  QwenVerifySplitKAttentionHalfPartialsWave64Kernel<Format><<<
       dim3(num_kv_heads / 2, rows, splits), 192, 0, stream>>>(
       q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
       num_heads, num_kv_heads, splits);
 }
+
+// The launcher is declared in the header and defined here, so the two
+// canonical cache formats are instantiated explicitly.
+template void LaunchVerifySplitKAttentionHalfPartialsWave64<QwenKvFormat::kFp16>(
+    const float* q, const void* k_cache, const void* v_cache, float* scratch,
+    std::uint32_t layer_idx, std::uint32_t start_pos, unsigned rows,
+    std::uint32_t max_context, std::uint32_t num_heads,
+    std::uint32_t num_kv_heads, std::uint32_t splits, hipStream_t stream);
+template void LaunchVerifySplitKAttentionHalfPartialsWave64<QwenKvFormat::kQ8_0>(
+    const float* q, const void* k_cache, const void* v_cache, float* scratch,
+    std::uint32_t layer_idx, std::uint32_t start_pos, unsigned rows,
+    std::uint32_t max_context, std::uint32_t num_heads,
+    std::uint32_t num_kv_heads, std::uint32_t splits, hipStream_t stream);
 
 }  // namespace gufo::hip::detail
 #endif  // defined(ENGINE_ENABLE_HIP)

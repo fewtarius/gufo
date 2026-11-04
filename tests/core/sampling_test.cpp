@@ -458,7 +458,6 @@ void TestSpeculativeAcceptanceIsUnbiased() {
   }
 }
 
-
 int main() {
   TestRawLogprobs();
   TestReasoningBudgetForcesTheEnd();

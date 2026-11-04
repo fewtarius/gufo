@@ -16,7 +16,7 @@ files that Laguna's presence requires.
 | **Block-sparse attention** | Quest-style block selection on the 12 full-attention layers. A prefill win that grows with depth: +52% at 141k tokens. |
 | **DFlash2 speculative decoding** | The drafter predicts a block of tokens from the target's tapped hidden states; each is verified against the target's own logits. |
 | **Native tool calls** | Laguna's `<tool_call>{name}<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` dialect, compiled into the sampler as a grammar and read back by a scanner. |
-| **KV row codec** | A model-agnostic q8_0/q4_0 row codec in `src/core/kv_codec/`, with the contract in [docs/kv-codec.md](docs/kv-codec.md). The Laguna engine can store its K/V cache as q8_0. |
+| **KV row codec** | A model-agnostic q8_0/q4_0 row codec in `src/core/kv_codec/`, with the contract in [docs/kv-codec.md](docs/kv-codec.md). The Laguna engine and the Qwen runner can store their K/V cache as q8_0. See [Laguna](docs/models/laguna/KV-Q8.md) and [Qwen](docs/models/qwen3.8-27b/KV-Q8.md). |
 | **Sampled-request speculation** | The server drafts for sampled requests as well as greedy ones, using the prompt CLI's acceptance rule. |
 
 ## What this fork does not carry

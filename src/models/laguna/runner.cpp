@@ -881,10 +881,10 @@ std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
       std::uint32_t chosen = native;
       // A session holds the window plus the verify rows, so size the cache
       // for what the session will really ask for.
-      while (chosen > 4096 &&
-             model->SessionBytesForContext(chosen + LagunaSession::kMaxVerifyRows) *
-                     2 >
-                 free_bytes) {
+      while (chosen > 4096 && model->SessionBytesForContext(
+                                  chosen + LagunaSession::kMaxVerifyRows) *
+                                      2 >
+                                  free_bytes) {
         chosen /= 2;
       }
       if (chosen != native) {
@@ -894,10 +894,9 @@ std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
                 " chosen=" + std::to_string(chosen) +
                 " reason=kv_cache_exceeds_free_device_memory free_mib=" +
                 std::to_string(free_bytes / (1024 * 1024)) + " kv_mib=" +
-                std::to_string(
-                    model->SessionBytesForContext(
-                        chosen + LagunaSession::kMaxVerifyRows) /
-                    (1024 * 1024)));
+                std::to_string(model->SessionBytesForContext(
+                                   chosen + LagunaSession::kMaxVerifyRows) /
+                               (1024 * 1024)));
         max_context = chosen;
       }
     }

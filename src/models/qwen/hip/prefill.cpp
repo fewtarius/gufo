@@ -65,11 +65,19 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptBatch(
   }
 
   tokenization::TokenId next_token = 0;
+  // A mixture-of-experts feed-forward runs its router per token, so the
+  // chunk is walked one token at a time and each token takes a row of the
+  // arena's MoE scratch. The chunk cannot exceed that scratch's rows.
+  const std::size_t chunk_limit =
+      weights_.config.IsMoe()
+          ? std::min<std::size_t>(arena_.GetMaxBatch(),
+                                  QwenGpuArena::kMoeScratchRows)
+          : arena_.GetMaxBatch();
   for (std::size_t offset = 0; offset < prompt_tokens.size();
-       offset += arena_.GetMaxBatch()) {
+       offset += chunk_limit) {
     CheckPrefillCancellation();
-    const std::size_t chunk_size = std::min<std::size_t>(
-        arena_.GetMaxBatch(), prompt_tokens.size() - offset);
+    const std::size_t chunk_size =
+        std::min<std::size_t>(chunk_limit, prompt_tokens.size() - offset);
     const bool is_last = offset + chunk_size == prompt_tokens.size();
     next_token =
         ForwardPromptChunk(prompt_tokens.subspan(offset, chunk_size),

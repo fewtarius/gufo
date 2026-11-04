@@ -24,6 +24,8 @@ struct TransferPoolState {
   };
   std::mutex mutex;
   std::vector<Slot> slots;
+  /// Creates the slot's stream and event on first use.
+  void EnsureSlot(std::size_t index);
   ~TransferPoolState() {
     for (auto& slot : slots) {
       if (slot.stream) {
@@ -164,11 +166,19 @@ TransferPool::TransferPool(std::size_t capacity) {
     throw std::invalid_argument("transfer pool requires a nonzero capacity");
   auto state = std::make_shared<detail::TransferPoolState>();
   state->slots.resize(capacity);
-  for (auto& slot : state->slots) {
-    Check(hipStreamCreateWithFlags(&slot.stream, hipStreamNonBlocking));
-    Check(hipEventCreateWithFlags(&slot.event, hipEventDisableTiming));
-  }
+  // The streams and events are created when a slot is first leased. A HIP
+  // stream reserves a command buffer in the device heap, and a pool sized for
+  // the worst case would hold hundreds of megabytes that a server with a
+  // handful of sessions never uses.
   state_ = std::move(state);
+}
+
+void detail::TransferPoolState::EnsureSlot(std::size_t index) {
+  auto& slot = slots[index];
+  if (slot.stream)
+    return;
+  Check(hipStreamCreateWithFlags(&slot.stream, hipStreamNonBlocking));
+  Check(hipEventCreateWithFlags(&slot.event, hipEventDisableTiming));
 }
 std::unique_ptr<TransferStream> TransferPool::TryAcquire() {
   const std::lock_guard lock(state_->mutex);
@@ -176,6 +186,7 @@ std::unique_ptr<TransferStream> TransferPool::TryAcquire() {
     auto& slot = state_->slots[i];
     if (slot.busy || slot.failed)
       continue;
+    state_->EnsureSlot(i);
     auto lease = std::make_shared<detail::TransferLease>(state_, i);
     // An unclaimed lease has no return-to-pool action on allocation failure.
     auto stream = std::unique_ptr<TransferStream>(new TransferStream(lease));

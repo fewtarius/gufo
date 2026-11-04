@@ -16,20 +16,34 @@ namespace gufo::models::qwen {
 inline constexpr std::uint32_t kQwenComponentPayloadVersion = 2;
 
 inline constexpr std::string_view QwenStateAbi(
-    bool speculative, bool fp16_attention_kv,
+    bool speculative, hip::QwenKvCacheStorage kv_storage,
     bool bf16_recurrent_state) noexcept {
+  const bool fp16_attention_kv = kv_storage == hip::QwenKvCacheStorage::kFp16;
+  const bool q8_attention_kv = kv_storage == hip::QwenKvCacheStorage::kQ8_0;
   if (bf16_recurrent_state) {
     if (speculative) {
+      if (q8_attention_kv) {
+        return "qwen-gfx1151-dflash-state-v4-q8_0-kv-bf16-recurrent";
+      }
       return fp16_attention_kv
                  ? "qwen-gfx1151-dflash-state-v4-fp16-kv-bf16-recurrent"
                  : "qwen-gfx1151-dflash-state-v4-fp32-kv-bf16-recurrent";
+    }
+    if (q8_attention_kv) {
+      return "qwen-gfx1151-state-v3-q8_0-kv-bf16-recurrent";
     }
     return fp16_attention_kv ? "qwen-gfx1151-state-v3-fp16-kv-bf16-recurrent"
                              : "qwen-gfx1151-state-v3-fp32-kv-bf16-recurrent";
   }
   if (speculative) {
+    if (q8_attention_kv) {
+      return "qwen-gfx1151-dflash-state-v3-q8_0-kv";
+    }
     return fp16_attention_kv ? "qwen-gfx1151-dflash-state-v3-fp16-kv"
                              : "qwen-gfx1151-dflash-state-v3-fp32-kv";
+  }
+  if (q8_attention_kv) {
+    return "qwen-gfx1151-state-v2-q8_0-kv";
   }
   return fp16_attention_kv ? "qwen-gfx1151-state-v2-fp16-kv"
                            : "qwen-gfx1151-state-v2-fp32-kv";

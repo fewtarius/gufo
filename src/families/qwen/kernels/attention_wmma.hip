@@ -67,7 +67,9 @@
 #include <type_traits>
 
 #include "src/families/qwen/hip_common/attention_policy.hpp"
+#include "src/families/qwen/kernels/kv_read.hpp"
 #include "src/families/qwen/kernels/ops/attention.hpp"
+#include "src/families/qwen/kernels/ops/kv.hpp"
 
 namespace gufo::hip {
 
@@ -140,15 +142,17 @@ constexpr std::uint32_t kWmmaKStride = kHeadDim + 8;
 // dimension, which is what keeps Q in registers at 64 VGPRs. Growing kQueryRows
 // and shrinking kKeys in step therefore trades nothing in the tiling but halves
 // the K/V bytes each block pulls per query row -- the dominant cost.
-template<std::uint32_t kQueryRows, std::uint32_t kKeys, bool kHeadMajor = false>
+template<std::uint32_t kQueryRows, std::uint32_t kKeys, bool kHeadMajor = false,
+         QwenKvFormat Format = QwenKvFormat::kFp16>
 // LLVM 24 otherwise uses 241 VGPRs for packed V, crossing the six-wave
 // allocation boundary. Keep six waves resident without changing the tiling.
 __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
     void WmmaCausalAttention(const float* __restrict__ q,
                              const float* __restrict__ gate,
-                             const __half* __restrict__ k_cache_f16,
-                             const __half* __restrict__ v_cache_f16,
+                             const void* __restrict__ k_cache,
+                             const void* __restrict__ v_cache,
                              float* __restrict__ out_context,
+                             std::size_t layer_offset,
                              std::uint32_t start_pos, std::size_t batch_size,
                              float* __restrict__ lse_out,
                              std::uint32_t key_begin,
@@ -256,8 +260,13 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
   constexpr std::size_t kv_stride = kHeadMajor ? kHeadDim : kKvWidth;
   const std::size_t head_offset = static_cast<std::size_t>(kv_head) * kHeadDim *
                                   (kHeadMajor ? context_end : 1);
-  const auto* v_base = v_cache_f16 + head_offset + v_slice;
-  const auto* k_base = k_cache_f16 + head_offset;
+  // The head-major route reads the packed binary16 workspace; the direct
+  // route reads the canonical cache in its own format.
+  const auto* v_half = static_cast<const __half*>(v_cache);
+  const auto v_elements =
+      detail::KvPlaneAt<Format>(v_cache, layer_offset + head_offset + v_slice);
+  const auto k_elements =
+      detail::KvPlaneAt<Format>(k_cache, layer_offset + head_offset);
 
   using ValueFragment = std::conditional_t<kHeadMajor, v16h, uint4>;
   constexpr std::uint32_t kValueFragments = kHeadMajor ? 2 : kVRegs;
@@ -271,19 +280,18 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
       for (std::uint32_t t = 0; t < 2; ++t) {
         const std::uint32_t dim = (wave + t * 8u) * 16u + sub;
         dst[t] = LoadFrag(
-            v_cache_f16 +
-            static_cast<std::size_t>(kv_head) * padded * kHeadDim +
+            v_half + static_cast<std::size_t>(kv_head) * padded * kHeadDim +
             static_cast<std::size_t>(key_start / 16u) * kHeadDim * 16u +
             dim * 16u);
       }
     } else {
       const std::uint32_t key_position = key_start + v_key;
-      const auto* src =
-          v_base + (static_cast<std::size_t>(key_position) * kv_stride);
       const bool live = key_position < context_end;
 #pragma unroll
       for (std::uint32_t j = 0; j < kVRegs; ++j) {
-        dst[j] = live ? *reinterpret_cast<const uint4*>(src + (j * 8))
+        dst[j] = live ? v_elements.LoadHalf8(
+                            (static_cast<std::size_t>(key_position) * kv_stride) +
+                            (j * 8))
                       : make_uint4(0u, 0u, 0u, 0u);
       }
     }
@@ -295,12 +303,11 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
       const std::uint32_t idx = tid + (n * 256);
       const std::uint32_t key_position = key_start + (idx / (kHeadDim / 8));
       const std::uint32_t d8 = (idx % (kHeadDim / 8)) * 8;
-      dst[n] =
-          (key_position < context_end)
-              ? *reinterpret_cast<const uint4*>(
-                    k_base +
-                    (static_cast<std::size_t>(key_position) * kv_stride) + d8)
-              : make_uint4(0u, 0u, 0u, 0u);
+      dst[n] = (key_position < context_end)
+                   ? k_elements.LoadHalf8(
+                         (static_cast<std::size_t>(key_position) * kv_stride) +
+                         d8)
+                   : make_uint4(0u, 0u, 0u, 0u);
     }
   };
 
@@ -600,9 +607,11 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
 
 // FFN scratch is idle during attention. Keep K head-major and transpose each
 // 16-key V tile into the layout consumed by WMMA. Persistent KV is unchanged.
-__global__ void PackAttentionHeads(const __half* keys, const __half* values,
+template<QwenKvFormat Format>
+__global__ void PackAttentionHeads(const void* keys, const void* values,
                                    __half* packed_keys, __half* packed_values,
-                                   std::uint32_t length) {
+                                   std::uint32_t length,
+                                   std::size_t layer_offset) {
   __shared__ __half tile[16][kHeadDim + 8];
   // Adjacent blocks read adjacent heads of the same source token tile.
   const std::uint32_t head = blockIdx.x, base = blockIdx.y * 16;
@@ -612,14 +621,15 @@ __global__ void PackAttentionHeads(const __half* keys, const __half* values,
     uint4 value = make_uint4(0, 0, 0, 0);
     if (base + key < length) {
       const auto src =
+          layer_offset +
           (static_cast<std::size_t>(base + key) * kKvHeads + head) * kHeadDim +
           dim;
       const auto dst =
           (static_cast<std::size_t>(head) * length + base + key) * kHeadDim +
           dim;
       *reinterpret_cast<uint4*>(packed_keys + dst) =
-          *reinterpret_cast<const uint4*>(keys + src);
-      value = *reinterpret_cast<const uint4*>(values + src);
+          detail::KvPlaneAt<Format>(keys, src).LoadHalf8(0);
+      value = detail::KvPlaneAt<Format>(values, src).LoadHalf8(0);
     }
     *reinterpret_cast<uint4*>(&tile[key][dim]) = value;
   }
@@ -643,9 +653,9 @@ __global__ void PackAttentionHeads(const __half* keys, const __half* values,
 
 bool LaunchQwenWmmaAttention(
     const float* q, const float* k, const float* v, const float* gate,
-    float* k_cache, float* v_cache, void* k_cache_f16, void* v_cache_f16,
-    float* out_context, std::uint32_t layer_idx, std::uint32_t start_pos,
-    std::size_t batch_size, std::uint32_t max_context, std::uint32_t num_heads,
+    float* k_cache, float* v_cache, QwenCompactKv compact, float* out_context,
+    std::uint32_t layer_idx, std::uint32_t start_pos, std::size_t batch_size,
+    std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t head_dim, hipStream_t stream,
     float* lse_out, std::uint32_t key_begin, bool skip_kv_write,
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
@@ -657,8 +667,8 @@ bool LaunchQwenWmmaAttention(
       .num_heads = num_heads,
       .num_kv_heads = num_kv_heads,
       .head_dim = head_dim,
-      .has_k_cache_f16 = k_cache_f16 != nullptr,
-      .has_v_cache_f16 = v_cache_f16 != nullptr,
+      .has_k_cache_f16 = compact.k != nullptr,
+      .has_v_cache_f16 = compact.v != nullptr,
   };
   if (!detail::IsTiledAttentionSupported(support_params) ||
       first_query >= batch_size || first_query % kWmmaQueryRows != 0) {
@@ -668,26 +678,36 @@ bool LaunchQwenWmmaAttention(
   constexpr std::size_t block_size = 256;
   const std::size_t layer_cache_offset =
       static_cast<std::size_t>(layer_idx) * max_context * kKvWidth;
-  auto* layer_k = static_cast<__half*>(k_cache_f16) + layer_cache_offset;
-  auto* layer_v = static_cast<__half*>(v_cache_f16) + layer_cache_offset;
+  const void* layer_k = compact.k;
+  const void* layer_v = compact.v;
 
   if (!skip_kv_write) {
-    if (start_pos > 0 && k_cache != nullptr && v_cache != nullptr) {
+    if (start_pos > 0 && k_cache != nullptr && v_cache != nullptr &&
+        compact.format == QwenKvFormat::kFp16) {
       const dim3 sync_grid(
           static_cast<unsigned int>((kKvWidth + block_size - 1) / block_size),
           static_cast<unsigned int>(start_pos));
       SyncTiledAttentionKvPrefixKernel<<<sync_grid, block_size, 0, stream>>>(
-          k_cache, v_cache, static_cast<__half*>(k_cache_f16),
-          static_cast<__half*>(v_cache_f16), layer_idx, start_pos, max_context,
+          k_cache, v_cache, static_cast<__half*>(compact.k),
+          static_cast<__half*>(compact.v), layer_idx, start_pos, max_context,
           num_kv_heads, head_dim);
     }
-    const dim3 pack_grid(
-        static_cast<unsigned int>((kKvWidth + block_size - 1) / block_size),
-        static_cast<unsigned int>(batch_size));
-    PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
-        k, v, static_cast<__half*>(k_cache_f16),
-        static_cast<__half*>(v_cache_f16), k_cache, v_cache, layer_idx,
-        start_pos, batch_size, max_context);
+    if (compact.format == QwenKvFormat::kQ8_0) {
+      LaunchEncodeQ8KvRows(k, v, compact.k, compact.v, layer_idx, start_pos,
+                           static_cast<std::uint32_t>(batch_size), max_context,
+                           kKvWidth, stream);
+    } else {
+      const dim3 pack_grid(
+          static_cast<unsigned int>((kKvWidth + block_size - 1) / block_size),
+          static_cast<unsigned int>(batch_size));
+      // The binary16 plane only exists for the FP16 format. The q8_0 plane
+      // is written by the encoder above.
+      const bool binary16_plane = compact.format == QwenKvFormat::kFp16;
+      PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
+          k, v, binary16_plane ? static_cast<__half*>(compact.k) : nullptr,
+          binary16_plane ? static_cast<__half*>(compact.v) : nullptr, k_cache,
+          v_cache, layer_idx, start_pos, batch_size, max_context);
+    }
   }
 
   const dim3 grid(
@@ -715,24 +735,41 @@ bool LaunchQwenWmmaAttention(
       const auto heads = std::min(heads_per_group, kKvHeads - first);
       const std::size_t query_offset =
           static_cast<std::size_t>(first) * kGqa * kHeadDim;
-      PackAttentionHeads<<<dim3(heads, (length + 15u) / 16u), block_size, 0,
-                           stream>>>(layer_k + first * kHeadDim,
-                                     layer_v + first * kHeadDim, packed_k,
-                                     packed_v, length);
+      const std::size_t group_offset =
+          layer_cache_offset +
+          (static_cast<std::size_t>(first) * kHeadDim);
+      if (compact.format == QwenKvFormat::kQ8_0) {
+        PackAttentionHeads<QwenKvFormat::kQ8_0>
+            <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(
+                layer_k, layer_v, packed_k, packed_v, length, group_offset);
+      } else {
+        PackAttentionHeads<QwenKvFormat::kFp16>
+            <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(
+                layer_k, layer_v, packed_k, packed_v, length, group_offset);
+      }
       const dim3 group_grid(grid.x, heads * (kGqa / kWmmaHeads));
       WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, true>
           <<<group_grid, block_size, 0, stream>>>(
               q + query_offset, gate ? gate + query_offset : nullptr, packed_k,
-              packed_v, out_context + query_offset, start_pos, batch_size,
+              packed_v, out_context + query_offset, 0, start_pos, batch_size,
               lse_out ? lse_out + first * kGqa * batch_size : nullptr,
               key_begin, static_cast<std::uint32_t>(first_query));
     }
     return true;
   }
-  WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys>
-      <<<grid, block_size, 0, stream>>>(
-          q, gate, layer_k, layer_v, out_context, start_pos, batch_size,
-          lse_out, key_begin, static_cast<std::uint32_t>(first_query));
+  if (compact.format == QwenKvFormat::kQ8_0) {
+    WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, false, QwenKvFormat::kQ8_0>
+        <<<grid, block_size, 0, stream>>>(
+            q, gate, layer_k, layer_v, out_context, layer_cache_offset,
+            start_pos, batch_size, lse_out, key_begin,
+            static_cast<std::uint32_t>(first_query));
+  } else {
+    WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, false, QwenKvFormat::kFp16>
+        <<<grid, block_size, 0, stream>>>(
+            q, gate, layer_k, layer_v, out_context, layer_cache_offset,
+            start_pos, batch_size, lse_out, key_begin,
+            static_cast<std::uint32_t>(first_query));
+  }
   return true;
 }
 

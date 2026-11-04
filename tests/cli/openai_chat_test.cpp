@@ -1548,8 +1548,7 @@ void TestLagunaToolCallsAreStructured() {
         content += message->member_str("content");
         if (const auto* found = message->find("tool_calls"))
           for (const auto& item : found->items())
-            arguments.push_back(
-                item.find("function")->member_str("arguments"));
+            arguments.push_back(item.find("function")->member_str("arguments"));
       }
     };
     if (stream) {

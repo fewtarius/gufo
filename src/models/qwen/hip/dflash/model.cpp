@@ -288,13 +288,12 @@ void PackDFlashWeights(speculative::QwenDFlashWeights& weights,
       // host pointer (it faults), which is why every other per-layer weight
       // is packed here too.
       transformer.attn_gate =
-          PackMatrixBf16(transformer.attn_gate, cfg.num_attention_heads,
-                         hidden, allocations, packed_bytes);
+          PackMatrixBf16(transformer.attn_gate, cfg.num_attention_heads, hidden,
+                         allocations, packed_bytes);
     }
 
-    const std::size_t groups = df_cfg.is_v1
-                                   ? 0
-                                   : hidden / df_cfg.conv_group_size;
+    const std::size_t groups =
+        df_cfg.is_v1 ? 0 : hidden / df_cfg.conv_group_size;
     const std::size_t dynamic_size = 2U * df_cfg.conv_kernel_size * groups;
     if (!df_cfg.is_v1) {
       layer.attention_conv_base = CopyVectorF32(
@@ -419,6 +418,9 @@ std::shared_ptr<const QwenDFlashGpuModel> QwenDFlashGpuModel::CreateImpl(
   auto raw_weights =
       speculative::QwenDFlashWeights::LoadFromGguf(*dflash_reader, error_msg);
   if (!raw_weights.has_value()) {
+    if (error_msg != nullptr && error_msg->empty()) {
+      *error_msg = "DFlash GGUF could not be loaded";
+    }
     return nullptr;
   }
 

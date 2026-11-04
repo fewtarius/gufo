@@ -104,8 +104,8 @@ void RejectOverlap(std::span<const std::byte> input,
       const float shifted =
           RoundToF32(RoundToF32(input[j + half * 16] * inverse) + 8.5F);
       const auto code = static_cast<unsigned>(std::clamp(shifted, 0.0F, 15.0F));
-      if (!IsFiniteHalf(FloatToHalfBits(static_cast<float>(
-                          static_cast<int>(code) - 8) * scale))) {
+      if (!IsFiniteHalf(FloatToHalfBits(
+              static_cast<float>(static_cast<int>(code) - 8) * scale))) {
         throw std::invalid_argument("KV row reconstruction overflows F16");
       }
       packed |= code << (half * 4);
@@ -197,8 +197,8 @@ std::size_t RowBytes(std::size_t elements, RowCodec codec) {
     return elements * 2;
   }
   const auto blocks = elements / kBlockElements;
-  return blocks * (codec == RowCodec::kQ8_0 ? sizeof(BlockQ8_0)
-                                            : sizeof(BlockQ4_0));
+  return blocks *
+         (codec == RowCodec::kQ8_0 ? sizeof(BlockQ8_0) : sizeof(BlockQ4_0));
 }
 
 std::int8_t RoundQ8Code(float scaled) {
@@ -207,8 +207,8 @@ std::int8_t RoundQ8Code(float scaled) {
   }
   // std::round breaks ties away from zero. That is the canonical ggml q8_0
   // primitive and it is NOT the IEEE default rounding.
-  return static_cast<std::int8_t>(std::clamp(std::round(scaled), -127.0F,
-                                              127.0F));
+  return static_cast<std::int8_t>(
+      std::clamp(std::round(scaled), -127.0F, 127.0F));
 }
 
 void EncodeRow(std::span<const float> input, RowCodec codec,
@@ -237,8 +237,7 @@ void EncodeRow(std::span<const float> input, RowCodec codec,
       (void)QuantizeQ4Block(input.data() + i);
     }
     for (std::size_t i = 0; i < input.size(); i += kBlockElements) {
-      WriteBlock(output, i / kBlockElements,
-                 QuantizeQ4Block(input.data() + i));
+      WriteBlock(output, i / kBlockElements, QuantizeQ4Block(input.data() + i));
     }
     return;
   }
@@ -275,9 +274,9 @@ void ValidateRow(std::span<const std::byte> input, std::size_t elements,
 void DecodeRow(std::span<const std::byte> input, RowCodec codec,
                std::span<float> output) {
   ValidateRow(input, output.size(), codec);
-  RejectOverlap(input, std::span<std::byte>(
-                           reinterpret_cast<std::byte*>(output.data()),
-                           output.size() * sizeof(float)));
+  RejectOverlap(
+      input, std::span<std::byte>(reinterpret_cast<std::byte*>(output.data()),
+                                  output.size() * sizeof(float)));
   if (codec == RowCodec::kF16) {
     for (std::size_t i = 0; i < output.size(); ++i) {
       std::uint16_t bits = 0;
@@ -298,8 +297,8 @@ void DecodeRow(std::span<const std::byte> input, RowCodec codec,
         // Round through binary16 before promoting: the stored scale is
         // binary16, so the product is generally not representable in
         // binary32.
-        output[i + j] = HalfBitsToFloat(FloatToHalfBits(
-            static_cast<float>(code) * scale));
+        output[i + j] =
+            HalfBitsToFloat(FloatToHalfBits(static_cast<float>(code) * scale));
       }
     }
     return;
@@ -310,10 +309,10 @@ void DecodeRow(std::span<const std::byte> input, RowCodec codec,
     std::memcpy(&scale_bits, src, sizeof(scale_bits));
     const float scale = HalfBitsToFloat(scale_bits);
     for (std::size_t j = 0; j < kBlockElements; ++j) {
-      const auto q = std::bit_cast<std::int8_t>(
-          std::to_integer<std::uint8_t>(src[2 + j]));
-      output[i + j] = HalfBitsToFloat(
-          FloatToHalfBits(static_cast<float>(q) * scale));
+      const auto q =
+          std::bit_cast<std::int8_t>(std::to_integer<std::uint8_t>(src[2 + j]));
+      output[i + j] =
+          HalfBitsToFloat(FloatToHalfBits(static_cast<float>(q) * scale));
     }
   }
 }

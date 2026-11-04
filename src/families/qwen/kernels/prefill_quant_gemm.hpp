@@ -139,7 +139,7 @@ __device__ __forceinline__ WmmaQuantAccumulator<WaveSize> WmmaQuant(
 // kernel a pass width selects. Other instantiations keep fast-math's order.
 template<int BM, int BN, int BK, int WM, int WN, core::GgmlType WType,
          int WaveSize = 32, bool kPinnedOrder = false>
-__launch_bounds__(WM * WN * WaveSize, 1) __global__
+__launch_bounds__(WM* WN* WaveSize, 1) __global__
     void WKQuantA8BlockedWmmaGEMMKernel(const void* __restrict__ w,
                                         const void* __restrict__ x_blocks,
                                         float* __restrict__ y,

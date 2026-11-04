@@ -23,7 +23,6 @@
 *.dll
 *.so.*
 
-
 # Fortran module files
 *.mod
 *.smod
@@ -123,3 +122,7 @@ tests/quality/compsec.json
 
 # CLIO local state
 .clio/
+
+# CLIO (managed automatically)
+.clio/*
+!.clio/instructions.md

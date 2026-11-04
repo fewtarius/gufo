@@ -78,7 +78,8 @@ trips per layer per bank (9 Q-slices + 1 K + 1 V, x2 for the hi/lo residual
 pass), more than the available hide window absorbs. Left off by default
 (`LAGUNA_NPU_QKV=1` opts in, not recommended). Full investigation, every
 dead end, and the exact numbers behind each of the above:
-[laguna-port-state.md](../../../src/models/laguna/laguna-port-state.md).
+[laguna-port-state.md](../../../src/models/laguna/laguna-port-state.md)
+(a historical record of the port process).
 
 Decode flattened substantially at depth this port (split-K decode attention,
 ported from Flash-Next/Flint's technique): 26 -> 19.8 -> 12.5 tok/s before,
@@ -111,6 +112,7 @@ at 61,108 tokens, all three on, no corruption) and across a 2,600-token
 generation past the decode HIP-graph capture boundary (a real, separate
 bug found and fixed this port - see
 [laguna-port-state.md](../../../src/models/laguna/laguna-port-state.md)
+(a historical record of the port process)
 for the full account, including three real selection bugs found when
 this was first turned on). Off by default; `LAGUNA_SPARSE_TOPK=N`
 overrides the 256-block budget.

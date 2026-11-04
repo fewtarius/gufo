@@ -2,9 +2,9 @@ name: Repository checks
 
 on:
   push:
-    branches: [ main ]
+    branches: [ unstable ]
   pull_request:
-    branches: [ main ]
+    branches: [ unstable ]
   workflow_dispatch:
 
 concurrency:
@@ -57,7 +57,7 @@ jobs:
             extra-trusted-public-keys = gufo.cachix.org-1:rfZe3n4lHINgyoACKzs5EthIZmBNvEyCCtufUpth0PE=
             extra-sandbox-paths = /tmp/gufo-ccache
 
-      # Pull on every run; push only from main so pull requests do not fill
+      # Pull on every run; push only from unstable so pull requests do not fill
       # the cache. Fork pull requests receive no token and only pull.
       - name: Enable Cachix
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -77,7 +77,7 @@ jobs:
         run: |
           nix flake check --print-build-logs --cores "$(nproc)" --max-jobs 2
 
-  # Populate the shared production-package cache on main for later builds.
+  # Populate the shared production-package cache on unstable for later builds.
   cache-package:
     name: Warm Linux package cache
     if: github.event_name != 'pull_request'

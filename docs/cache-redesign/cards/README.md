@@ -135,12 +135,12 @@ repeat them.
   from. The implementer chooses which files change.
 - **The current cache is untouched** until card 19 deletes it. Improvements to
   the current cache are separate work, outside this initiative.
-- **Where PRs land:** cards 01–18 merge into `main` as ordinary PRs. They change
-  no runtime behavior, and running their tests in `main`'s CI catches breakage
+- **Where PRs land:** cards 01–18 merge into `unstable` as ordinary PRs. They change
+  no runtime behavior, and running their tests in `unstable`'s CI catches breakage
   from ongoing model work early. Only card 19 lives on a short-lived branch, as
   a stack of PRs merged together (D1). There is no long-lived integration
-  branch: the code involved changes too often on `main`, and CI only runs on
-  PRs to `main`.
+  branch: the code involved changes too often on `unstable`, and CI only runs on
+  PRs to `unstable`.
 - **No cost while inactive:** anything that touches a production path before
   card 19, such as the adapters' guard calls, must do nothing until the new
   cache is attached. The model's standard speed benchmark shows it.

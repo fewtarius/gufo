@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
 
       # A unique save key retains each successful build; restore the newest
-      # compiler cache for this pinned toolchain, including main's warm cache.
+      # compiler cache for this pinned toolchain, including unstable's warm cache.
       - name: Restore compiler cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

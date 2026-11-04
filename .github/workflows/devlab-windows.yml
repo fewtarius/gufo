@@ -2,10 +2,10 @@ name: Windows validation
 
 on:
   push:
-    # Main refreshes caches restored by pull requests.
-    branches: [ main ]
+    # Unstable refreshes caches restored by pull requests.
+    branches: [ unstable ]
   pull_request:
-    branches: [ main ]
+    branches: [ unstable ]
   workflow_dispatch:
 
 permissions:

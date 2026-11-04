@@ -6,18 +6,18 @@ All workflow files below live in `.github/workflows/`.
 
 | Workflow file | Display name | Jobs | Runner | Activation and connections |
 | --- | --- | --- | --- | --- |
-| `checks.yml` | Repository checks | Run CPU and repository checks | GitHub Ubuntu | PRs to main, pushes to main, manual. Runs bounded CPU/repository and functional harness tests. |
-| `checks.yml` | Repository checks | Warm Linux package cache | GitHub Ubuntu through `linux-build.yml` | Main/manual only. Builds the production package and populates its shared cache. |
-| `linux-build.yml` | Linux build | Linux package | GitHub Ubuntu | Reusable only. Called for main cache warming or candidate/baseline comparison packages. |
+| `checks.yml` | Repository checks | Run CPU and repository checks | GitHub Ubuntu | PRs to unstable, pushes to unstable, manual. Runs bounded CPU/repository and functional harness tests. |
+| `checks.yml` | Repository checks | Warm Linux package cache | GitHub Ubuntu through `linux-build.yml` | Unstable/manual only. Builds the production package and populates its shared cache. |
+| `linux-build.yml` | Linux build | Linux package | GitHub Ubuntu | Reusable only. Called for unstable cache warming or candidate/baseline comparison packages. |
 | `windows-build.yml` | Windows build | Windows package | GitHub Windows | Reusable only; called by Windows validation and Toolboxes releases. Builds the native application, runs CPU contracts, and verifies bundles. |
-| `devlab-windows.yml` | Windows validation | Build | Through `windows-build.yml` | PRs to main, pushes to main and manual runs. Calls the reusable native builder. |
-| `devlab-windows.yml` | Windows validation | Run Windows model checks | Devlab Windows Strix Halo | After the build on Gufo PR/manual runs. Downloads the same run’s Windows bundle and runs GPU diagnostics and model smoke checks. |
+| `devlab-windows.yml` | Windows validation | Build | Through `windows-build.yml` | PRs to unstable, pushes to unstable and manual runs. Calls the reusable native builder. |
+| `devlab-windows.yml` | Windows validation | Run Windows model checks | Devlab Windows Strix Halo | After the build on Gufo PR/manual runs. Downloads the same run's Windows bundle and runs GPU diagnostics and model smoke checks. |
 | `devlab-linux.yml` | Linux validation | Authorize and select checks | GitHub Ubuntu | Non-draft PR updates/readiness and manual runs. Pins revisions and produces the selection plan. |
-| `devlab-linux.yml` | Linux validation | Build | GitHub Ubuntu through `linux-build.yml` | After authorization when selected work exists. Builds candidate and main packages. |
+| `devlab-linux.yml` | Linux validation | Build | GitHub Ubuntu through `linux-build.yml` | After authorization when selected work exists. Builds candidate and unstable packages. |
 | `devlab-linux.yml` | Linux validation | Run Linux model checks | Devlab Linux Strix Halo | Starts preparation after authorization, overlaps hosted compilation, and waits for comparison artifacts before running tests. |
 | `devlab-linux.yml` | Linux validation | Publish results | GitHub Ubuntu | After authorization/testing, including failure paths when a head revision is available. Publishes the report and `devlab/functional` status. |
 | `devlab-comment.yml` | Functional reporting | Update PR comment | GitHub Ubuntu | Linux validation PR runs starting/completing. Maintains placeholders and publishes fork reports without executing PR code. |
-| `pr-title.yml` | PR title | Validate PR title | GitHub Ubuntu | PR open/edit/reopen/synchronize events targeting main. |
+| `pr-title.yml` | PR title | Validate PR title | GitHub Ubuntu | PR open/edit/reopen/synchronize events targeting unstable. |
 | `release-please.yml` | Release automation | Prepare, merge and publish release | GitHub Ubuntu | Daily/manual. Waits for repository checks, PR title and `devlab/functional`, then merges/publishes and requests Toolboxes artifacts. |
 
 `devlab/functional` is an aggregate commit status rather than a runner job.
@@ -30,7 +30,7 @@ visible warning on both ordinary and release PRs.
 - Repository checks retain the compiler cache restore prefix, Cachix, and Magic
   Nix Cache. Fresh per-run save keys refresh the immutable Actions cache rather
   than retaining an initially empty archive for the entire week.
-- Linux package builds retain the package compiler cache and Cachix. Main's
+- Linux package builds retain the package compiler cache and Cachix. Unstable's
   warming invocation remains because functional PR runs do not push to Cachix.
 - Windows builds retain the SDK archive, compiler cache, and vcpkg binary cache,
   including their existing keys, restore prefixes, and save conditions.
@@ -45,8 +45,8 @@ visible warning on both ordinary and release PRs.
 
 The release workflow's explicit check-name references and the reporting
 workflow's `workflow_run` subscription are updated alongside the workflow names.
-Toolboxes must use `gufo-org/gufo/.github/workflows/windows-build.yml@main` after
-the renamed workflow reaches Gufo main; its caller change must not land first.
+Toolboxes must use `gufo-org/gufo/.github/workflows/windows-build.yml@unstable` after
+the renamed workflow reaches Gufo unstable; its caller change must not land first.
 
 GitHub's live **Required CI** ruleset (25949571) has been migrated to the
 renamed check contexts:

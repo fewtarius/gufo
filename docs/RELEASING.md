@@ -1,8 +1,8 @@
 # Releasing
 
 Gufo uses squash merges and Conventional Commit pull request titles to keep
-`main` machine-readable. A pull request may contain arbitrary work-in-progress
-commits; its title becomes the single commit retained on `main`.
+`unstable` machine-readable. A pull request may contain arbitrary work-in-progress
+commits; its title becomes the single commit retained on `unstable`.
 
 ## Pull request titles
 
@@ -93,11 +93,11 @@ from `version.txt`.
 After Release Please creates a GitHub Release, the same workflow sends its exact
 `vX.Y.Z` tag to the Toolboxes repository. Toolboxes builds the release package
 from that tag and publishes OCI images tagged `X.Y.Z`, `X.Y` and `latest`.
-Rolling Toolboxes images remain separate: they follow Gufo `main` and use `edge`
+Rolling Toolboxes images remain separate: they follow Gufo `unstable` and use `edge`
 and `sha-<revision>` tags.
 
 In parallel with the OCI builds, Toolboxes calls Gufo's reusable Windows
-workflow from `main`, with the same exact release tag as its source checkout.
+workflow from `unstable`, with the same exact release tag as its source checkout.
 It uses the existing Windows toolchain and host contract suite, sets the
 release version and source revision explicitly, and checks the packaged
 `gufo.exe --version` and platform diagnosis with only the bundled runtime on
@@ -170,9 +170,9 @@ Two parallel additive PRs each add a different, descriptively named record.
 Their merge counts both, advancing the revision twice without editing a shared
 counter or reconciling assigned versions in filenames or headings.
 Branch revisions are provisional until merged; numeric revision floors promise
-compatibility along the canonical main history, not between divergent branches.
+compatibility along the canonical unstable history, not between divergent branches.
 An extension using an API available only on a branch must pin that Gufo source
-revision, then choose its minimum API version from main after the feature merges.
+revision, then choose its minimum API version from unstable after the feature merges.
 Older minimum requirements in existing manifests remain valid and need no bump.
 Source archives and Nix builds compute the same version without Git metadata.
 

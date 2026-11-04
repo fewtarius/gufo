@@ -44,10 +44,10 @@ struct BlockWorkspace {
     const auto hidden_size = config.hidden_size;
     const auto kv_size =
         static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
-    const auto dynamic_size =
-        draft.is_v1
-            ? 0
-            : 2U * draft.conv_kernel_size * (hidden_size / draft.conv_group_size);
+    const auto dynamic_size = draft.is_v1
+                                  ? 0
+                                  : 2U * draft.conv_kernel_size *
+                                        (hidden_size / draft.conv_group_size);
     hidden = take(rows * hidden_size);
     normed = take(rows * hidden_size);
     conv = take(rows * hidden_size);
@@ -448,10 +448,9 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
       LaunchBatchedFusedQKNormRoPEKvWrite(
           query, key, key, static_cast<const float*>(layer.attn_q_norm.data),
           static_cast<const float*>(layer.attn_k_norm.data), query, key,
-          nullptr, nullptr, {}, 0, requests[index].position,
-          counts[index] + 1U, 0, config.num_attention_heads,
-          config.num_key_value_heads, config.head_dim, config.rotary_dim,
-          config.rope_theta, 1e-6F, stream);
+          nullptr, nullptr, {}, 0, requests[index].position, counts[index] + 1U,
+          0, config.num_attention_heads, config.num_key_value_heads,
+          config.head_dim, config.rotary_dim, config.rope_theta, 1e-6F, stream);
     }
     stage("q", scratch.query, query_size);
     stage("k", scratch.key, kv_size);

@@ -21,11 +21,11 @@ namespace gufo::hip {
 ///
 /// `expert_ids` and `expert_weights` are [rows][num_used]; `shared_weight`
 /// is [rows].
-void LaunchMoeRouterTopK(const float* router_logits,
-                         const float* shared_logit, std::int32_t* expert_ids,
-                         float* expert_weights, float* shared_weight,
-                         std::uint32_t num_experts, std::uint32_t num_used,
-                         std::uint32_t rows, hipStream_t stream = nullptr);
+void LaunchMoeRouterTopK(const float* router_logits, const float* shared_logit,
+                         std::int32_t* expert_ids, float* expert_weights,
+                         float* shared_weight, std::uint32_t num_experts,
+                         std::uint32_t num_used, std::uint32_t rows,
+                         hipStream_t stream = nullptr);
 
 /// Combines the routed experts and the shared expert into the feed-forward's
 /// output.

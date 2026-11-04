@@ -51,8 +51,7 @@ ContinuationLayout::ContinuationLayout(const core::ModelConfig& c,
   };
   add(ContinuationPart::kMetadata, 0, kContinuationMetadataBytes);
   add(ContinuationPart::kLogits, 0, Product({c.vocab_size, sizeof(float)}));
-  const std::uint32_t kv_width =
-      Product({c.num_key_value_heads, c.head_dim});
+  const std::uint32_t kv_width = Product({c.num_key_value_heads, c.head_dim});
   const auto kv_row = hip::QwenKvRowBytes(policy.kv_cache_storage, kv_width);
   const auto key_width = Product({2, c.ssm_group_count, c.ssm_state_size});
   if (key_width > std::numeric_limits<std::uint32_t>::max() - c.ssm_inner_size)
@@ -66,7 +65,8 @@ ContinuationLayout::ContinuationLayout(const core::ModelConfig& c,
   for (std::uint32_t layer = 0; layer < c.num_layers; ++layer) {
     if ((layer + 1) % c.full_attention_interval == 0) {
       const std::uint32_t kv_version =
-          policy.UsesQ8AttentionKv() ? 3 : (policy.UsesFp16AttentionKv() ? 1 : 2);
+          policy.UsesQ8AttentionKv() ? 3
+                                     : (policy.UsesFp16AttentionKv() ? 1 : 2);
       add(ContinuationPart::kKey, kv_row, 0, layer, kv_version);
       add(ContinuationPart::kValue, kv_row, 0, layer, kv_version);
     } else {

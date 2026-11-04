@@ -14,14 +14,14 @@
 #ifndef GUFO_FAMILIES_QWEN_KERNELS_KV_READ_HPP_
 #define GUFO_FAMILIES_QWEN_KERNELS_KV_READ_HPP_
 
-#include "src/families/qwen/hip_common/execution_policy.hpp"
-#include "src/families/qwen/kernels/kv_q8.hpp"
-
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
 #include <cstdint>
+
+#include "src/families/qwen/hip_common/execution_policy.hpp"
+#include "src/families/qwen/kernels/kv_q8.hpp"
 
 namespace gufo::hip::detail {
 
@@ -49,13 +49,12 @@ struct KvElements {
   ///
   /// The four elements share one q8_0 block: every Qwen attention route
   /// reads vectors of four, and their bases are multiples of four.
-  [[nodiscard]] __device__ __forceinline__ float4 Load4(
-      std::size_t element) const {
+  [[nodiscard]] __device__ __forceinline__ float4
+  Load4(std::size_t element) const {
     const std::size_t absolute = offset + element;
     if constexpr (Format == QwenKvFormat::kFp16) {
-      const auto* pairs =
-          reinterpret_cast<const __half2*>(static_cast<const __half*>(base) +
-                                           absolute);
+      const auto* pairs = reinterpret_cast<const __half2*>(
+          static_cast<const __half*>(base) + absolute);
       const float2 lower = __half22float2(pairs[0]);
       const float2 upper = __half22float2(pairs[1]);
       return make_float4(lower.x, lower.y, upper.x, upper.y);
@@ -65,8 +64,8 @@ struct KvElements {
   }
 
   /// Two consecutive elements as one binary16 pair.
-  [[nodiscard]] __device__ __forceinline__ __half2 LoadHalf2(
-      std::size_t element) const {
+  [[nodiscard]] __device__ __forceinline__ __half2
+  LoadHalf2(std::size_t element) const {
     const std::size_t absolute = offset + element;
     if constexpr (Format == QwenKvFormat::kFp16) {
       return reinterpret_cast<const __half2*>(static_cast<const __half*>(base) +
@@ -80,8 +79,8 @@ struct KvElements {
   ///
   /// The eight elements share one q8_0 block: the staged tiles read vectors
   /// of eight, and their bases are multiples of eight.
-  [[nodiscard]] __device__ __forceinline__ uint4 LoadHalf8(
-      std::size_t element) const {
+  [[nodiscard]] __device__ __forceinline__ uint4
+  LoadHalf8(std::size_t element) const {
     const std::size_t absolute = offset + element;
     if constexpr (Format == QwenKvFormat::kFp16) {
       return *reinterpret_cast<const uint4*>(static_cast<const __half*>(base) +

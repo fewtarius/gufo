@@ -1,9 +1,9 @@
 #include "src/core/diagnostics/compatibility.h"
 
-#include "src/core/diagnostics/gpu_architecture.h"
-
 #include <sstream>
 #include <string>
+
+#include "src/core/diagnostics/gpu_architecture.h"
 
 namespace gufo::diagnostics {
 

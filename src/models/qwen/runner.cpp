@@ -1,4 +1,5 @@
 #include "src/models/qwen/runner.hpp"
+
 #include "src/core/logging/logging.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
@@ -23,11 +24,11 @@
 #include "gufo/ext/gguf_identity.hpp"
 #include "gufo/ext/host_budget.hpp"
 #include "gufo/ext/speculative_verifier.hpp"
+#include "src/core/hip/heap_placement.hpp"
 #include "src/families/qwen/config/qwen_config.hpp"
 #include "src/families/qwen/control_tokens/control_tokens.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/hip_common/execution_policy.hpp"
-#include "src/core/hip/heap_placement.hpp"
 #include "src/families/qwen/text/chat_template.hpp"
 #include "src/families/qwen/text/tokenizer.hpp"
 #include "src/families/qwen/vision/encoder.hpp"
@@ -74,8 +75,8 @@ static_assert(kQwenMaxResumeTokens ==
     policy.kv_cache_storage = hip::QwenKvCacheStorage::kQ8_0;
     return policy;
   }
-  throw std::invalid_argument(
-      "QWEN_KV_CACHE_TYPE must be f16 or q8_0, got: " + type);
+  throw std::invalid_argument("QWEN_KV_CACHE_TYPE must be f16 or q8_0, got: " +
+                              type);
 }
 
 template<typename State, typename Tokens>
@@ -636,7 +637,8 @@ public:
     if (execution_policy_.UsesQ8AttentionKv()) {
       const auto& config = model_->GetConfig();
       const auto kv_width =
-          static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
+          static_cast<std::size_t>(config.num_key_value_heads) *
+          config.head_dim;
       if (kv_width % 32 != 0) {
         throw std::invalid_argument(
             "the q8_0 K/V cache needs a KV width that is a multiple of 32");
@@ -810,19 +812,18 @@ public:
       const auto mib = [](std::size_t bytes) {
         return bytes / (1024ULL * 1024ULL);
       };
-      server::Logger::Info("loader",
-                   "event=memory_plan kind=qwen context=" +
-                       std::to_string(max_context_) + " weights_mib=" +
-                       std::to_string(mib(resident_weights)) + " scratch_mib=" +
-                       std::to_string(mib(usage.temporary_scratch_bytes)) +
-                       " state_mib=" +
-                       std::to_string(mib(usage.request_state_bytes)) +
-                       " snapshot_mib=" +
-                       std::to_string(mib(snapshot_capacity)) +
-                       " device_free_mib=" +
-                       std::to_string(capacity.value_or(0) / (1024 * 1024)) +
-                       " device_total_mib=" +
-                       std::to_string(total_bytes / (1024 * 1024)));
+      server::Logger::Info(
+          "loader",
+          "event=memory_plan kind=qwen context=" +
+              std::to_string(max_context_) + " weights_mib=" +
+              std::to_string(mib(resident_weights)) + " scratch_mib=" +
+              std::to_string(mib(usage.temporary_scratch_bytes)) +
+              " state_mib=" + std::to_string(mib(usage.request_state_bytes)) +
+              " snapshot_mib=" + std::to_string(mib(snapshot_capacity)) +
+              " device_free_mib=" +
+              std::to_string(capacity.value_or(0) / (1024 * 1024)) +
+              " device_total_mib=" +
+              std::to_string(total_bytes / (1024 * 1024)));
     }
     return {
         .resident_weights_bytes = resident_weights,

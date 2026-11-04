@@ -14,10 +14,10 @@
 #ifndef GUFO_FAMILIES_QWEN_KERNELS_KV_Q8_HPP_
 #define GUFO_FAMILIES_QWEN_KERNELS_KV_Q8_HPP_
 
-#include "src/core/kv_codec/kv_q8_device.hpp"
-
 #include <cstddef>
 #include <cstdint>
+
+#include "src/core/kv_codec/kv_q8_device.hpp"
 
 namespace gufo::hip::detail {
 
@@ -34,8 +34,8 @@ using Q8KvBlock = gufo::core::kv_codec::device::Q8KvBlock;
 /// The stored scale is the block's binary16 magnitude. The product is
 /// computed in binary32 and rounded to binary16, which is the host codec's
 /// decode contract.
-[[nodiscard]] __device__ __forceinline__ __half Q8KvHalf(
-    const Q8KvBlock& block, std::uint32_t offset) noexcept {
+[[nodiscard]] __device__ __forceinline__ __half
+Q8KvHalf(const Q8KvBlock& block, std::uint32_t offset) noexcept {
   const float scale = __half2float(block.scale);
   return __float2half(static_cast<float>(block.values[offset]) * scale);
 }
@@ -51,17 +51,18 @@ using Q8KvBlock = gufo::core::kv_codec::device::Q8KvBlock;
 /// The four elements share one block. Every Qwen attention route reads
 /// vectors of four, and the vector bases are multiples of four, so the four
 /// elements never straddle a block boundary.
-[[nodiscard]] __device__ __forceinline__ float4 Q8KvLoadFloat4(
-    const Q8KvBlock* base, std::size_t absolute) noexcept {
+[[nodiscard]] __device__ __forceinline__ float4
+Q8KvLoadFloat4(const Q8KvBlock* base, std::size_t absolute) noexcept {
   const Q8KvBlock& block = base[absolute / 32];
   const std::uint32_t offset = static_cast<std::uint32_t>(absolute % 32);
   return make_float4(Q8KvFloat(block, offset), Q8KvFloat(block, offset + 1),
-                     Q8KvFloat(block, offset + 2), Q8KvFloat(block, offset + 3));
+                     Q8KvFloat(block, offset + 2),
+                     Q8KvFloat(block, offset + 3));
 }
 
 /// Two consecutive elements as one binary16 pair.
-[[nodiscard]] __device__ __forceinline__ __half2 Q8KvLoadHalf2(
-    const Q8KvBlock* base, std::size_t absolute) noexcept {
+[[nodiscard]] __device__ __forceinline__ __half2
+Q8KvLoadHalf2(const Q8KvBlock* base, std::size_t absolute) noexcept {
   const Q8KvBlock& block = base[absolute / 32];
   const std::uint32_t offset = static_cast<std::uint32_t>(absolute % 32);
   return __halves2half2(Q8KvHalf(block, offset), Q8KvHalf(block, offset + 1));
@@ -77,16 +78,16 @@ using Q8KvBlock = gufo::core::kv_codec::device::Q8KvBlock;
   const Q8KvBlock& block = base[absolute / 32];
   const std::uint32_t offset = static_cast<std::uint32_t>(absolute % 32);
   lower = __halves2half2(Q8KvHalf(block, offset), Q8KvHalf(block, offset + 1));
-  upper = __halves2half2(Q8KvHalf(block, offset + 2),
-                         Q8KvHalf(block, offset + 3));
+  upper =
+      __halves2half2(Q8KvHalf(block, offset + 2), Q8KvHalf(block, offset + 3));
 }
 
 /// Eight consecutive elements as eight binary16 values.
 ///
 /// The eight elements share one block: the staged tiles read vectors of
 /// eight, and their bases are multiples of eight.
-[[nodiscard]] __device__ __forceinline__ uint4 Q8KvLoadHalf8(
-    const Q8KvBlock* base, std::size_t absolute) {
+[[nodiscard]] __device__ __forceinline__ uint4
+Q8KvLoadHalf8(const Q8KvBlock* base, std::size_t absolute) {
   const Q8KvBlock& block = base[absolute / 32];
   const std::uint32_t offset = static_cast<std::uint32_t>(absolute % 32);
   const float scale = __half2float(block.scale);

@@ -11,8 +11,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/core/logging/logging.hpp"
+#include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
@@ -27,10 +27,10 @@ constexpr std::uint32_t kMaxPromptBatch = 4096;
 /// row of the expert scratch per token, so its prompt chunks are bounded by
 /// the expert scratch. The arena's activation scratch is sized from the same
 /// bound: sizing it for the dense cap would reserve rows no pass can reach.
-[[nodiscard]] std::uint32_t PromptBatchRows(
-    const core::ModelConfig& config, std::uint32_t context) noexcept {
+[[nodiscard]] std::uint32_t PromptBatchRows(const core::ModelConfig& config,
+                                            std::uint32_t context) noexcept {
   return std::min(context, config.IsMoe() ? QwenGpuArena::kMoeScratchRows
-                                           : kMaxPromptBatch);
+                                          : kMaxPromptBatch);
 }
 constexpr std::size_t kMaxTargetLayerTaps = 5;
 constexpr std::array<std::uint8_t, 8> kCompactSnapshotMagic = {
@@ -73,13 +73,10 @@ struct KvPlaneGeometry {
   std::size_t rows{0};
 };
 
-KvPlaneGeometry KvPlaneCopyGeometry(QwenKvCacheStorage storage,
-                                    std::uint32_t attention_layers,
-                                    std::uint32_t kv_width,
-                                    std::uint32_t num_kv_heads,
-                                    std::uint32_t head_dim,
-                                    std::uint32_t max_context,
-                                    std::uint32_t valid_context) {
+KvPlaneGeometry KvPlaneCopyGeometry(
+    QwenKvCacheStorage storage, std::uint32_t attention_layers,
+    std::uint32_t kv_width, std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    std::uint32_t max_context, std::uint32_t valid_context) {
   if (QwenKvCacheIsTokenMajor(storage)) {
     const std::size_t row_bytes = QwenKvRowBytes(storage, kv_width);
     return {
@@ -90,10 +87,10 @@ KvPlaneGeometry KvPlaneCopyGeometry(QwenKvCacheStorage storage,
   }
   constexpr std::size_t kElementBytes = sizeof(float);
   return {
-      .live_pitch = CheckedMultiply(
-          CheckedMultiply(max_context, head_dim), kElementBytes),
-      .packed_pitch = CheckedMultiply(
-          CheckedMultiply(valid_context, head_dim), kElementBytes),
+      .live_pitch = CheckedMultiply(CheckedMultiply(max_context, head_dim),
+                                    kElementBytes),
+      .packed_pitch = CheckedMultiply(CheckedMultiply(valid_context, head_dim),
+                                      kElementBytes),
       .rows = CheckedMultiply(attention_layers, num_kv_heads),
   };
 }
@@ -346,18 +343,17 @@ std::size_t QwenGpuSnapshot::SerializeCompact(
     // the payload pitch is the valid row bytes.
     const std::size_t source_pitch =
         layout.live_kv_bytes_per_plane / attention_layers_;
-    const void* source = kv_storage_ == QwenKvCacheStorage::kFp16 ? d_kv_f16_
-                          : kv_storage_ == QwenKvCacheStorage::kQ8_0
-                              ? d_kv_q8_
-                              : d_kv_f32_;
+    const void* source = kv_storage_ == QwenKvCacheStorage::kFp16   ? d_kv_f16_
+                         : kv_storage_ == QwenKvCacheStorage::kQ8_0 ? d_kv_q8_
+                                                                    : d_kv_f32_;
     if (source == nullptr) {
       throw std::logic_error("Qwen compact snapshot has no KV storage");
     }
     transfer.Copy2D(destination.data() + layout.k_offset,
                     layout.live_kv_bytes_per_plane / attention_layers_, source,
-                source_pitch,
-                layout.live_kv_bytes_per_plane / attention_layers_,
-                attention_layers_);
+                    source_pitch,
+                    layout.live_kv_bytes_per_plane / attention_layers_,
+                    attention_layers_);
     const auto* source_bytes = static_cast<const std::uint8_t*>(source);
     transfer.Copy2D(destination.data() + layout.v_offset,
                     layout.live_kv_bytes_per_plane / attention_layers_,
@@ -460,13 +456,12 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
   auto& state = usage.request_state_bytes;
   // One row per (layer, position) in each of the K and V planes.
   const std::size_t kv_row_bytes = QwenKvRowBytes(policy.kv_cache_storage, kv);
-  CheckedAdd(
-      CheckedMultiply(
-          CheckedMultiply(CheckedMultiply(config.FullAttentionLayerCount(),
-                                          context),
-                          kv_row_bytes),
-          2),
-      &state);
+  CheckedAdd(CheckedMultiply(
+                 CheckedMultiply(
+                     CheckedMultiply(config.FullAttentionLayerCount(), context),
+                     kv_row_bytes),
+                 2),
+             &state);
 
   CheckedAdd(RecurrentStateBytes(config, policy), &state);
   return usage;
@@ -512,10 +507,9 @@ std::size_t QwenGpuArena::SnapshotPayloadBytes(
       policy_.kv_cache_storage,
       CheckedMultiply(config_.num_key_value_heads, config_.head_dim));
   const auto unused = CheckedMultiply(
-      CheckedMultiply(
-          CheckedMultiply(config_.FullAttentionLayerCount(),
-                          max_context_ - valid_context),
-          kv_row_bytes),
+      CheckedMultiply(CheckedMultiply(config_.FullAttentionLayerCount(),
+                                      max_context_ - valid_context),
+                      kv_row_bytes),
       2);
   return GetMemoryUsage().request_state_bytes - unused;
 }
@@ -598,16 +592,13 @@ std::unique_ptr<QwenGpuSnapshot> QwenGpuArena::SaveSnapshot(
     const auto source_plane = CheckedMultiply(source_pitch, rows);
     const auto target_plane = CheckedMultiply(target_pitch, rows);
     const auto* source = static_cast<const std::uint8_t*>(
-        policy_.UsesFp16AttentionKv()
-            ? d_attention_kv_f16
-            : policy_.UsesQ8AttentionKv()
-                ? d_attention_kv_q8
-                : static_cast<void*>(d_kv_cache));
+        policy_.UsesFp16AttentionKv() ? d_attention_kv_f16
+        : policy_.UsesQ8AttentionKv() ? d_attention_kv_q8
+                                      : static_cast<void*>(d_kv_cache));
     auto* destination = static_cast<std::uint8_t*>(
-        policy_.UsesFp16AttentionKv()
-            ? snapshot->d_kv_f16_
-            : policy_.UsesQ8AttentionKv() ? snapshot->d_kv_q8_
-                                          : snapshot->d_kv_f32_);
+        policy_.UsesFp16AttentionKv() ? snapshot->d_kv_f16_
+        : policy_.UsesQ8AttentionKv() ? snapshot->d_kv_q8_
+                                      : snapshot->d_kv_f32_);
     for (std::size_t plane = 0; plane < 2; ++plane)
       transfer.Copy2D(destination + plane * target_plane, target_pitch,
                       source + plane * source_plane, source_pitch, target_pitch,
@@ -643,7 +634,8 @@ void QwenGpuArena::RestoreSnapshot(const QwenGpuSnapshot& snapshot) {
   }
 
   Reset();
-  const std::size_t kv_row_bytes = QwenKvRowBytes(policy_.kv_cache_storage, kv_width);
+  const std::size_t kv_row_bytes =
+      QwenKvRowBytes(policy_.kv_cache_storage, kv_width);
   const std::size_t kv_bytes = CheckedMultiply(
       CheckedMultiply(attention_layers, snapshot.valid_context_), kv_row_bytes);
   if (kv_bytes != 0) {
@@ -657,15 +649,13 @@ void QwenGpuArena::RestoreSnapshot(const QwenGpuSnapshot& snapshot) {
     const auto source_plane = CheckedMultiply(source_pitch, rows);
     const auto target_plane = CheckedMultiply(target_pitch, rows);
     const auto* source = static_cast<const std::uint8_t*>(
-        policy_.UsesFp16AttentionKv()
-            ? snapshot.d_kv_f16_
-            : policy_.UsesQ8AttentionKv() ? snapshot.d_kv_q8_
-                                          : snapshot.d_kv_f32_);
+        policy_.UsesFp16AttentionKv() ? snapshot.d_kv_f16_
+        : policy_.UsesQ8AttentionKv() ? snapshot.d_kv_q8_
+                                      : snapshot.d_kv_f32_);
     auto* destination = static_cast<std::uint8_t*>(
-        policy_.UsesFp16AttentionKv()
-            ? d_attention_kv_f16
-            : policy_.UsesQ8AttentionKv() ? d_attention_kv_q8
-                                          : static_cast<void*>(d_kv_cache));
+        policy_.UsesFp16AttentionKv() ? d_attention_kv_f16
+        : policy_.UsesQ8AttentionKv() ? d_attention_kv_q8
+                                      : static_cast<void*>(d_kv_cache));
     for (std::size_t plane = 0; plane < 2; ++plane)
       ThrowOnHipError(
           hipMemcpy2DAsync(destination + plane * target_plane, target_pitch,
@@ -725,11 +715,11 @@ void QwenGpuArena::RestoreCompactSnapshot(
     const auto destination_pitch = geometry.live_pitch;
     const auto rows = geometry.rows;
     auto* destination = static_cast<std::uint8_t*>(
-        policy_.UsesFp16AttentionKv()
-            ? d_attention_kv_f16
-            : policy_.UsesQ8AttentionKv() ? d_attention_kv_q8
-                                          : static_cast<void*>(d_kv_cache));
-    const std::size_t full_plane_bytes = CheckedMultiply(destination_pitch, rows);
+        policy_.UsesFp16AttentionKv() ? d_attention_kv_f16
+        : policy_.UsesQ8AttentionKv() ? d_attention_kv_q8
+                                      : static_cast<void*>(d_kv_cache));
+    const std::size_t full_plane_bytes =
+        CheckedMultiply(destination_pitch, rows);
     ThrowOnHipError(
         hipMemcpy2DAsync(destination, destination_pitch,
                          payload.data() + layout.k_offset, source_pitch,
@@ -861,11 +851,13 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
         hipMalloc(&d_weights_bf16, max_weight_elems * sizeof(hip_bfloat16)));
 
     const std::size_t kv_width =
-        static_cast<std::size_t>(config_.num_key_value_heads) * config_.head_dim;
+        static_cast<std::size_t>(config_.num_key_value_heads) *
+        config_.head_dim;
     const std::size_t kv_bytes = CheckedMultiply(
-        CheckedMultiply(static_cast<std::size_t>(config_.FullAttentionLayerCount()) *
-                            max_context_,
-                        QwenKvRowBytes(policy_.kv_cache_storage, kv_width)),
+        CheckedMultiply(
+            static_cast<std::size_t>(config_.FullAttentionLayerCount()) *
+                max_context_,
+            QwenKvRowBytes(policy_.kv_cache_storage, kv_width)),
         2);
     if (policy_.UsesFp16AttentionKv()) {
       HIP_CHECK(hipMalloc(&d_attention_kv_f16, kv_bytes));
@@ -899,15 +891,15 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
       const auto mib = [](std::size_t bytes) {
         return bytes / (1024ULL * 1024ULL);
       };
-      server::Logger::Info("loader",
-                   "event=memory_plan kind=qwen context=" +
-                       std::to_string(max_context_) + " batch=" +
-                       std::to_string(batch) + " scratch_mib=" +
-                       std::to_string(mib(usage.temporary_scratch_bytes)) +
-                       " state_mib=" +
-                       std::to_string(mib(usage.request_state_bytes)) +
-                       " device_free_mib=" + std::to_string(mib(heap_free)) +
-                       " device_total_mib=" + std::to_string(mib(heap_total)));
+      server::Logger::Info(
+          "loader",
+          "event=memory_plan kind=qwen context=" +
+              std::to_string(max_context_) + " batch=" + std::to_string(batch) +
+              " scratch_mib=" +
+              std::to_string(mib(usage.temporary_scratch_bytes)) +
+              " state_mib=" + std::to_string(mib(usage.request_state_bytes)) +
+              " device_free_mib=" + std::to_string(mib(heap_free)) +
+              " device_total_mib=" + std::to_string(mib(heap_total)));
     }
   } catch (...) {
     FreeAll();

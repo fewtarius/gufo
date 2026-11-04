@@ -31,7 +31,8 @@ static_assert(offsetof(Q8KvBlock, values) == 2);
 inline constexpr std::uint32_t kQ8BlockElements = 32;
 
 /// Bytes one row of `elements` values occupies in q8_0.
-[[nodiscard]] constexpr std::size_t Q8KvRowBytes(std::uint32_t elements) noexcept {
+[[nodiscard]] constexpr std::size_t Q8KvRowBytes(
+    std::uint32_t elements) noexcept {
   return static_cast<std::size_t>(elements / kQ8BlockElements) *
          sizeof(Q8KvBlock);
 }
@@ -98,8 +99,8 @@ inline constexpr float kQ8MaxHalf = 65504.0F;
 [[nodiscard]] __host__ __device__ inline float Q8KvDequantize(
     const Q8KvBlock& block, std::uint32_t offset) noexcept {
   const float scale = __half2float(block.scale);
-  return __half2float(__float2half(static_cast<float>(block.values[offset]) *
-                                   scale));
+  return __half2float(
+      __float2half(static_cast<float>(block.values[offset]) * scale));
 }
 
 /// Reconstructs eight codes from one q8_0 block into eight halves.

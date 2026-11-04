@@ -37,7 +37,7 @@ const void* QuantizedRow(const QwenTensorRef& tensor, std::size_t row,
 /// One expert's [rows][cols] matrix inside a stacked [experts][rows][cols]
 /// quantized tensor.
 QwenTensorRef ExpertSlice(const QwenTensorRef& stacked, std::size_t expert,
-                           std::size_t rows, std::size_t cols) noexcept {
+                          std::size_t rows, std::size_t cols) noexcept {
   const std::size_t stride =
       quant::QuantizedRowBytes(stacked.type, cols) * rows;
   return {.data = static_cast<const std::uint8_t*>(stacked.data) +
@@ -349,7 +349,8 @@ void ForwardMoeFFN(std::span<const float> x, const QwenLayerWeights& layer,
   }
 
   float shared_logit = 0.0F;
-  const auto* gate_row = static_cast<const float*>(layer.ffn_gate_inp_shexp.data);
+  const auto* gate_row =
+      static_cast<const float*>(layer.ffn_gate_inp_shexp.data);
   for (std::size_t i = 0; i < hidden; ++i) {
     shared_logit += gate_row[i] * x[i];
   }

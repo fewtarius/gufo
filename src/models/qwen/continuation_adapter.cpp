@@ -809,10 +809,9 @@ std::span<const std::byte> ContinuationAdapter::BorrowRowsView(
   const void* base = policy_.UsesQ8AttentionKv()
                          ? static_cast<const void*>(arena.d_attention_kv_q8)
                          : static_cast<const void*>(arena.d_attention_kv_f16);
-  return {
-      static_cast<const std::byte*>(base) +
-          ((plane + layer) * std::size_t{context_} + first) * row,
-      (end - first) * row};
+  return {static_cast<const std::byte*>(base) +
+              ((plane + layer) * std::size_t{context_} + first) * row,
+          (end - first) * row};
 }
 cache::Completion ContinuationAdapter::TransferRows(
     State& state, const ContinuationComponent& component, bool load, Rows first,
@@ -824,12 +823,12 @@ cache::Completion ContinuationAdapter::TransferRows(
   const std::size_t plane = component.part == ContinuationPart::kValue
                                 ? c.FullAttentionLayerCount()
                                 : 0;
-  auto* native = static_cast<std::byte*>(
-      policy_.UsesQ8AttentionKv()
-          ? static_cast<void*>(arena.d_attention_kv_q8)
-          : policy_.UsesFp16AttentionKv()
-              ? static_cast<void*>(arena.d_attention_kv_f16)
-              : static_cast<void*>(arena.d_kv_cache)) +
+  auto* native =
+      static_cast<std::byte*>(policy_.UsesQ8AttentionKv()
+                                  ? static_cast<void*>(arena.d_attention_kv_q8)
+                              : policy_.UsesFp16AttentionKv()
+                                  ? static_cast<void*>(arena.d_attention_kv_f16)
+                                  : static_cast<void*>(arena.d_kv_cache)) +
       (plane + layer) * context_ * row;
   return Transfer(state, load, stream, [&](hip::TransferStream& transfer) {
     if (first == end)

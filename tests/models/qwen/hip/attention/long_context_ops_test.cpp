@@ -84,9 +84,9 @@ void TestLongContextBatchedAttention(bool fp16) {
       d_v, fp16 ? static_cast<const void*>(half_values.data()) : values.data(),
       cache_bytes, hipMemcpyHostToDevice));
   for (const std::uint32_t first : {16125U, 16382U, 32766U, 99998U}) {
-    const gufo::hip::QwenCompactKv compact{
-        fp16 ? d_k : nullptr, fp16 ? d_v : nullptr,
-        gufo::hip::QwenKvFormat::kFp16};
+    const gufo::hip::QwenCompactKv compact{fp16 ? d_k : nullptr,
+                                           fp16 ? d_v : nullptr,
+                                           gufo::hip::QwenKvFormat::kFp16};
     gufo::hip::LaunchBatchedAttention(
         d_q, nullptr, nullptr, d_gate,
         fp16 ? nullptr : static_cast<float*>(d_k),
@@ -97,9 +97,8 @@ void TestLongContextBatchedAttention(bool fp16) {
           d_q + row * width, nullptr, nullptr, d_gate + row * width,
           fp16 ? nullptr : static_cast<float*>(d_k),
           fp16 ? nullptr : static_cast<float*>(d_v), compact,
-          d_scalar + row * width, 0,
-          first + static_cast<std::uint32_t>(row), capacity, heads, kv_heads,
-          dim, nullptr, nullptr, true);
+          d_scalar + row * width, 0, first + static_cast<std::uint32_t>(row),
+          capacity, heads, kv_heads, dim, nullptr, nullptr, true);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> batch(query.size()), scalar(query.size());
@@ -257,8 +256,7 @@ void TestLongContextDecodeAttention(bool fp16) {
                                  fp16 ? d_v_cache : nullptr,
                                  gufo::hip::QwenKvFormat::kFp16},
         d_out, 0, position, max_context, num_heads, num_kv_heads, head_dim,
-        nullptr,
-        d_split_k_scratch);
+        nullptr, d_split_k_scratch);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(output.data(), d_out, attention_width * sizeof(float),
@@ -406,13 +404,12 @@ void TestBaselineToTiledKvCacheTransition() {
 
   // 1. Golden sequential reference token-by-token
   for (std::size_t token = 0; token < total_batch; ++token) {
-    gufo::hip::LaunchAttention(d_q + token * attention_width,
-                               d_k + token * kv_width, d_v + token * kv_width,
-                               d_gate + token * attention_width, d_cache_seq,
-                               d_cache_seq + cache_elements, {},
-                               d_out_seq + token * attention_width, 0,
-                               static_cast<std::uint32_t>(token), max_context,
-                               num_heads, num_kv_heads, head_dim);
+    gufo::hip::LaunchAttention(
+        d_q + token * attention_width, d_k + token * kv_width,
+        d_v + token * kv_width, d_gate + token * attention_width, d_cache_seq,
+        d_cache_seq + cache_elements, {}, d_out_seq + token * attention_width,
+        0, static_cast<std::uint32_t>(token), max_context, num_heads,
+        num_kv_heads, head_dim);
   }
 
   // 2. Incremental transition:

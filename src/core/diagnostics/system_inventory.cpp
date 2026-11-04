@@ -1,10 +1,10 @@
 #include "src/core/diagnostics/system_inventory.h"
 
 #include <cctype>
-#include "src/core/diagnostics/gpu_architecture.h"
 #include <iomanip>
 #include <sstream>
 
+#include "src/core/diagnostics/gpu_architecture.h"
 #include "src/core/platform/os_info.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)

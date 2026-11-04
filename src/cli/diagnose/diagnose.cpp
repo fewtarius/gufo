@@ -170,8 +170,8 @@ diagnostics::DiagnosticReport CollectDiagnostics(
 
     if (diagnostics::IsSupportedGpuArchitecture(inventory.gpu.architecture)) {
       check.status = diagnostics::DiagnosticStatus::kPass;
-      check.message = "Detected supported AMD GPU (" +
-                      inventory.gpu.architecture + ")";
+      check.message =
+          "Detected supported AMD GPU (" + inventory.gpu.architecture + ")";
     } else {
       check.status = diagnostics::DiagnosticStatus::kFail;
       check.message = "Unsupported GPU architecture: detected " +

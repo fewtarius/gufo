@@ -154,19 +154,18 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
             attention_scratch.v.data(), ssm_scratch.gate.data(),
             arena.d_kv_cache, OffsetIfPresent(arena.d_kv_cache, total_k),
             arena.CompactKv(), ssm_scratch.out.data(), attn_layer_idx, pos,
-            arena.GetMaxContext(),
-            config.num_attention_heads, config.num_key_value_heads,
-            config.head_dim, arena.stream, attention_scratch.split_k.data(),
-            fused_qknorm_rope_kv);
-      } else {
-        LaunchAttention(
-            attention_scratch.q.data(), attention_scratch.k.data(),
-            attention_scratch.v.data(), ssm_scratch.gate.data(),
-            arena.d_kv_cache, OffsetIfPresent(arena.d_kv_cache, total_k),
-            arena.CompactKv(), ssm_scratch.out.data(), attn_layer_idx, d_in_pos,
             arena.GetMaxContext(), config.num_attention_heads,
             config.num_key_value_heads, config.head_dim, arena.stream,
-            fused_qknorm_rope_kv);
+            attention_scratch.split_k.data(), fused_qknorm_rope_kv);
+      } else {
+        LaunchAttention(attention_scratch.q.data(), attention_scratch.k.data(),
+                        attention_scratch.v.data(), ssm_scratch.gate.data(),
+                        arena.d_kv_cache,
+                        OffsetIfPresent(arena.d_kv_cache, total_k),
+                        arena.CompactKv(), ssm_scratch.out.data(),
+                        attn_layer_idx, d_in_pos, arena.GetMaxContext(),
+                        config.num_attention_heads, config.num_key_value_heads,
+                        config.head_dim, arena.stream, fused_qknorm_rope_kv);
       }
 
       // Output projection, routed through the quant_gemm module (HIP
@@ -226,15 +225,13 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       if (config.IsMoe()) {
         // A routed feed-forward: the router picks the experts on the device
         // and their outputs are combined with the shared expert's.
-        MoeFfnToken(layer, config, scratch.moe, 0,
-                    decode_scratch.normed.data(), ffn_scratch.out.data(),
-                    arena.stream);
+        MoeFfnToken(layer, config, scratch.moe, 0, decode_scratch.normed.data(),
+                    ffn_scratch.out.data(), arena.stream);
       } else {
         const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
         gufo::models::qwen::FfnForward(
-            module_ctx, ffn_view, decode_scratch.normed,
-            ffn_scratch.activation, ffn_scratch.activation,
-            ffn_scratch.activation, ffn_scratch.out);
+            module_ctx, ffn_view, decode_scratch.normed, ffn_scratch.activation,
+            ffn_scratch.activation, ffn_scratch.activation, ffn_scratch.out);
       }
     }
 

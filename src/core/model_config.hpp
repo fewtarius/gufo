@@ -100,9 +100,9 @@ struct ModelConfig {
            ssm_group_count > 0 && ssm_time_step_rank > 0 &&
            ssm_inner_size > 0 && (ssm_inner_size % ssm_time_step_rank) == 0 &&
            SsmValueSize() == 128 && is_text_only &&
-           (!IsMoe() || (num_experts_used > 0 &&
-                         num_experts_used <= num_experts &&
-                         expert_ff > 0 && shared_expert_ff > 0));
+           (!IsMoe() ||
+            (num_experts_used > 0 && num_experts_used <= num_experts &&
+             expert_ff > 0 && shared_expert_ff > 0));
   }
 };
 

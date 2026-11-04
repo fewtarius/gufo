@@ -275,9 +275,9 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
                 d_gate + offset * attention_size, d_cache, v_cache,
                 gufo::hip::QwenCompactKv{d_cache_f16, cache_f16_v,
                                          gufo::hip::QwenKvFormat::kFp16},
-                d_out_new + offset * attention_size, 0,
-                start_pos + offset, count, kMaxContext, kNumHeads, kNumKvHeads,
-                kHeadDim, nullptr, nullptr, key_begin, true))
+                d_out_new + offset * attention_size, 0, start_pos + offset,
+                count, kMaxContext, kNumHeads, kNumKvHeads, kHeadDim, nullptr,
+                nullptr, key_begin, true))
           std::abort();
       }
       HIP_CHECK(hipMemcpy(again.data(), d_out_new, q_elements * sizeof(float),
@@ -363,9 +363,9 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
                 d_q, d_k, d_v, d_gate, d_cache, v_cache,
                 gufo::hip::QwenCompactKv{d_cache_f16, cache_f16_v,
                                          gufo::hip::QwenKvFormat::kFp16},
-                d_out_new, 0, start_pos, batch_size, kMaxContext,
-                kNumHeads, kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin,
-                true, k_work, v_work, first_query))
+                d_out_new, 0, start_pos, batch_size, kMaxContext, kNumHeads,
+                kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin, true,
+                k_work, v_work, first_query))
           std::abort();
         HIP_CHECK(hipMemcpy(again.data(), d_out_new, q_elements * sizeof(float),
                             hipMemcpyDeviceToHost));

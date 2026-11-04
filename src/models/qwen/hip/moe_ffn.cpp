@@ -14,9 +14,9 @@
 namespace gufo::hip {
 
 void MoeFfnToken(const models::QwenLayerWeights& layer,
-                 const core::ModelConfig& config,
-                 const QwenMoeScratch& scratch, std::uint32_t row,
-                 const float* x, float* out, hipStream_t stream) {
+                 const core::ModelConfig& config, const QwenMoeScratch& scratch,
+                 std::uint32_t row, const float* x, float* out,
+                 hipStream_t stream) {
   const int experts = static_cast<int>(config.num_experts);
   const int used = static_cast<int>(config.num_experts_used);
   const int ff = static_cast<int>(config.expert_ff);
@@ -35,16 +35,16 @@ void MoeFfnToken(const models::QwenLayerWeights& layer,
   float* shared_out = scratch.shared_out.data() + (row * hidden);
 
   // The router's scores and the shared expert's own gate.
-  LaunchGEMV(layer.ffn_gate_inp.data, layer.ffn_gate_inp.type, x,
-             router_logits, experts, hidden, stream);
+  LaunchGEMV(layer.ffn_gate_inp.data, layer.ffn_gate_inp.type, x, router_logits,
+             experts, hidden, stream);
   LaunchGEMV(layer.ffn_gate_inp_shexp.data, layer.ffn_gate_inp_shexp.type, x,
              shared_logit, 1, hidden, stream);
 
   // The selection, on the device: the softmax, the top-k and the
   // renormalization of the selected weights.
   LaunchMoeRouterTopK(router_logits, shared_logit, ids, weights, shared_weight,
-                       static_cast<std::uint32_t>(experts),
-                       static_cast<std::uint32_t>(used), 1, stream);
+                      static_cast<std::uint32_t>(experts),
+                      static_cast<std::uint32_t>(used), 1, stream);
 
   // The routed experts: the gate and up of each selected expert, then its
   // down projection.
@@ -82,7 +82,7 @@ void WarmMoeDecode(const models::QwenModelWeights& weights,
   const int ff = static_cast<int>(config.expert_ff);
   const int hidden = static_cast<int>(config.hidden_size);
   HIP_CHECK(hipMemsetAsync(scratch.ids.data(), 0,
-                            scratch.ids.size() * sizeof(std::int32_t), stream));
+                           scratch.ids.size() * sizeof(std::int32_t), stream));
   for (const auto& layer : weights.layers) {
     (void)qfn_mmq_moe_gated_vec(
         static_cast<int>(layer.ffn_gate_exps.type), layer.ffn_gate_exps.data,

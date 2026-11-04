@@ -286,10 +286,9 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
       const std::size_t experts = weights.config.num_experts;
       const std::size_t expert_ff = weights.config.expert_ff;
       const std::size_t shared_ff = weights.config.shared_expert_ff;
-      if (!ValidateTensor(l.ffn_gate_inp, experts * hidden_size,
-                          TensorRole::kProjection,
-                          prefix + "ffn_gate_inp.weight", error_msg,
-                          hidden_size) ||
+      if (!ValidateTensor(
+              l.ffn_gate_inp, experts * hidden_size, TensorRole::kProjection,
+              prefix + "ffn_gate_inp.weight", error_msg, hidden_size) ||
           !ValidateTensor(l.ffn_gate_exps, experts * expert_ff * hidden_size,
                           TensorRole::kProjection,
                           prefix + "ffn_gate_exps.weight", error_msg,
@@ -306,10 +305,9 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
                           TensorRole::kProjection,
                           prefix + "ffn_gate_shexp.weight", error_msg,
                           hidden_size) ||
-          !ValidateTensor(l.ffn_up_shexp, shared_ff * hidden_size,
-                          TensorRole::kProjection,
-                          prefix + "ffn_up_shexp.weight", error_msg,
-                          hidden_size) ||
+          !ValidateTensor(
+              l.ffn_up_shexp, shared_ff * hidden_size, TensorRole::kProjection,
+              prefix + "ffn_up_shexp.weight", error_msg, hidden_size) ||
           !ValidateTensor(l.ffn_down_shexp, hidden_size * shared_ff,
                           TensorRole::kProjection,
                           prefix + "ffn_down_shexp.weight", error_msg,

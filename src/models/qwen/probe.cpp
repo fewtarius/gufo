@@ -15,8 +15,8 @@ bool ProbeQwenGguf(const core::GgufReader& reader) {
   // recurrent structure with a routed feed-forward. It is a narrower
   // model, so its embedding length is its own.
   if (architecture == "qwen35moe") {
-    return reader.GetMetadataUint64("qwen35moe.embedding_length")
-               .value_or(0) == 2048;
+    return reader.GetMetadataUint64("qwen35moe.embedding_length").value_or(0) ==
+           2048;
   }
   if (architecture != "qwen" && architecture != "qwen2" &&
       architecture != "qwen35" && architecture != "qwen38") {

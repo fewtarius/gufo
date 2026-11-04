@@ -130,7 +130,7 @@ __device__ __forceinline__ void UpdateHalf4(float4& output, const __half* value,
 // 16 (two heads per wave32 or four per wave64); a 16-lane head keeps the
 // 32-lane element layout, so lane l holds the original lanes l and l + 16.
 template<unsigned Lanes, bool MixedFma,
-          QwenKvFormat Format = QwenKvFormat::kFp16>
+         QwenKvFormat Format = QwenKvFormat::kFp16>
 struct SplitKAttentionHead {
   static_assert(Lanes == 16 || Lanes == 32);
   static constexpr std::uint32_t kHeadDim = 256;
@@ -163,9 +163,10 @@ struct SplitKAttentionHead {
   // The four elements of one vector as the two binary16 pairs the dot
   // consumes. The q8_0 plane reconstructs them from the block that holds
   // them; the FP16 plane reads them.
-  __device__ __forceinline__ static void KeyPairs(
-      const KvElements<Format>& key, std::size_t element, __half2& lower,
-      __half2& upper) {
+  __device__ __forceinline__ static void KeyPairs(const KvElements<Format>& key,
+                                                  std::size_t element,
+                                                  __half2& lower,
+                                                  __half2& upper) {
     if constexpr (Format == QwenKvFormat::kFp16) {
       const auto* pairs = reinterpret_cast<const __half2*>(
           static_cast<const __half*>(key.base) + key.offset + element);

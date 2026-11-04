@@ -437,9 +437,9 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
       d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus, d_vc_fus,
       gufo::hip::QwenCompactKv{d_kc16_fus, d_vc16_fus,
                                gufo::hip::QwenKvFormat::kFp16},
-      d_out_fus, layer_idx, start_pos, batch, max_context,
-                                    num_heads, num_kv_heads, head_dim, nullptr,
-                                    /*skip_kv_write=*/true);
+      d_out_fus, layer_idx, start_pos, batch, max_context, num_heads,
+      num_kv_heads, head_dim, nullptr,
+      /*skip_kv_write=*/true);
 
   HIP_CHECK(hipDeviceSynchronize());
 

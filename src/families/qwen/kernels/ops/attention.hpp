@@ -88,7 +88,8 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
                             std::uint32_t layer_idx, std::uint32_t start_pos,
                             std::size_t batch_size, std::uint32_t max_context,
                             std::uint32_t num_heads, std::uint32_t num_kv_heads,
-                            std::uint32_t head_dim, hipStream_t stream = nullptr,
+                            std::uint32_t head_dim,
+                            hipStream_t stream = nullptr,
                             bool skip_kv_write = false,
                             void* out_context_bf16 = nullptr);
 
@@ -152,8 +153,8 @@ void LaunchBatchedAttentionGemm(
     const float* gate, float* k_cache, float* v_cache, QwenCompactKv compact,
     float* scores, float* out_context, std::uint32_t layer_idx,
     std::uint32_t start_pos, std::size_t batch_size, std::uint32_t max_context,
-    std::uint32_t num_heads, std::uint32_t num_kv_heads,
-    std::uint32_t head_dim, hipStream_t stream = nullptr);
+    std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
+    hipStream_t stream = nullptr);
 
 }  // namespace gufo::hip
 

@@ -27,10 +27,10 @@ laguna::ChatMessage ToMessage(const json::Value& value) {
       laguna::ChatToolCall native;
       const auto& function = *call.find("function");
       native.name = function.member_str("name");
-      for (const auto& [key, argument] : function.find("arguments")->members()) {
+      for (const auto& [key, argument] :
+           function.find("arguments")->members()) {
         native.arguments.push_back(
-            {key,
-             argument.is_string() ? argument.str() : argument.tojson(),
+            {key, argument.is_string() ? argument.str() : argument.tojson(),
              argument.is_string()});
       }
       message.tool_calls.push_back(std::move(native));

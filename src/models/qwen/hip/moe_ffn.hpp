@@ -21,9 +21,9 @@ namespace gufo::hip {
 /// forward's output. `scratch` holds the router's logits, the selected
 /// experts and their outputs; `row` is the scratch row this token uses.
 void MoeFfnToken(const models::QwenLayerWeights& layer,
-                 const core::ModelConfig& config,
-                 const QwenMoeScratch& scratch, std::uint32_t row,
-                 const float* x, float* out, hipStream_t stream);
+                 const core::ModelConfig& config, const QwenMoeScratch& scratch,
+                 std::uint32_t row, const float* x, float* out,
+                 hipStream_t stream);
 
 /// Runs every layer's expert kernels once outside a graph capture, so the
 /// matrix library's workspace pool is sized before the decode graph is

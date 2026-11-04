@@ -5,8 +5,6 @@
 // separately: ties away from zero, the unrounded binary32 scale in the
 // division, the binary16 rounding of the stored scale, and the binary16
 // rounding of the decoded product.
-#include "src/core/kv_codec/codec.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -20,6 +18,7 @@
 #include <string_view>
 #include <vector>
 
+#include "src/core/kv_codec/codec.hpp"
 #include "src/core/kv_codec/half.hpp"
 
 namespace {
@@ -38,7 +37,7 @@ void Expect(bool condition, std::string_view message) {
   }
 }
 
-template <typename Fn>
+template<typename Fn>
 void ExpectThrows(Fn&& fn, std::string_view message) {
   try {
     fn();
@@ -78,14 +77,13 @@ void TestHalfConversion() {
 
   // A tie between two representable halves goes to the even one.
   // 1 + 2^-11 is exactly between 1.0 and 1.0 + 2^-10.
-  Expect(HalfBitsToFloat(FloatToHalfBits(1.0F + 0.00048828125F)) ==
-             1.0F,
+  Expect(HalfBitsToFloat(FloatToHalfBits(1.0F + 0.00048828125F)) == 1.0F,
          "half tie to even, down");
   // 1 + 3*2^-11 is exactly between 1.0 + 2^-10 (odd mantissa) and
   // 1.0 + 2^-9 (even mantissa).
-  Expect(HalfBitsToFloat(FloatToHalfBits(1.0F + 0.00146484375F)) ==
-             1.001953125F,
-         "half tie to even, up");
+  Expect(
+      HalfBitsToFloat(FloatToHalfBits(1.0F + 0.00146484375F)) == 1.001953125F,
+      "half tie to even, up");
 
   // Signed zero is preserved in both directions.
   Expect(std::signbit(HalfBitsToFloat(FloatToHalfBits(-0.0F))),
@@ -94,11 +92,11 @@ void TestHalfConversion() {
          "half preserves positive zero");
 
   // Infinity and NaN.
-  Expect(std::isinf(HalfBitsToFloat(FloatToHalfBits(
-               std::numeric_limits<float>::infinity()))),
+  Expect(std::isinf(HalfBitsToFloat(
+             FloatToHalfBits(std::numeric_limits<float>::infinity()))),
          "half preserves infinity");
-  Expect(std::isnan(HalfBitsToFloat(FloatToHalfBits(
-               std::numeric_limits<float>::quiet_NaN()))),
+  Expect(std::isnan(HalfBitsToFloat(
+             FloatToHalfBits(std::numeric_limits<float>::quiet_NaN()))),
          "half maps NaN to NaN");
 
   // A finite value above the largest half rounds to infinity.
@@ -128,9 +126,12 @@ void TestRoundingPrimitive() {
   Expect(Code(200.0F) == 127, "q8 code clamps high");
   Expect(Code(-200.0F) == -127, "q8 code clamps low");
 
-  ExpectThrows([] { gufo::core::kv_codec::RoundQ8Code(
-                        std::numeric_limits<float>::infinity()); },
-                "q8 code rejects a non-finite scaled value");
+  ExpectThrows(
+      [] {
+        gufo::core::kv_codec::RoundQ8Code(
+            std::numeric_limits<float>::infinity());
+      },
+      "q8 code rejects a non-finite scaled value");
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +144,11 @@ void TestGeometry() {
   Expect(RowSize(64, RowCodec::kQ4_0) == 36, "q4_0 row bytes");
 
   ExpectThrows([] { RowBytes(30, RowCodec::kQ8_0); },
-                "q8_0 rejects a partial block");
+               "q8_0 rejects a partial block");
   ExpectThrows([] { RowBytes(30, RowCodec::kQ4_0); },
-                "q4_0 rejects a partial block");
+               "q4_0 rejects a partial block");
   ExpectThrows([] { RowBytes(64, static_cast<RowCodec>(9)); },
-                "an unknown codec is rejected");
+               "an unknown codec is rejected");
 }
 
 // ---------------------------------------------------------------------------
@@ -184,8 +185,7 @@ void TestQ8EncodeDecode() {
     const float step = (i < 32) ? scale0 : scale1;
     Expect(std::abs(decoded[i] - row[i]) <= step + 1.0e-6F,
            "q8_0 decode is within one step");
-    Expect(decoded[i] ==
-               HalfBitsToFloat(FloatToHalfBits(decoded[i])),
+    Expect(decoded[i] == HalfBitsToFloat(FloatToHalfBits(decoded[i])),
            "q8_0 decode is F16-representable");
   }
 
@@ -193,7 +193,8 @@ void TestQ8EncodeDecode() {
   std::vector<float> zeros(32, 0.0F);
   auto zero_bytes = Bytes(RowBytes(32, RowCodec::kQ8_0));
   gufo::core::kv_codec::EncodeRow(zeros, RowCodec::kQ8_0, zero_bytes);
-  const auto* zero_block = reinterpret_cast<const BlockQ8_0*>(zero_bytes.data());
+  const auto* zero_block =
+      reinterpret_cast<const BlockQ8_0*>(zero_bytes.data());
   Expect(zero_block->scale == 0, "q8_0 zero block has a zero scale");
   for (std::size_t i = 0; i < 32; ++i) {
     Expect(zero_block->values[i] == 0, "q8_0 zero block has zero codes");
@@ -228,9 +229,9 @@ void TestQ8RejectsBadPayloads() {
   std::vector<float> row(32, 1.0F);
   gufo::core::kv_codec::EncodeRow(row, RowCodec::kQ8_0, packed);
   packed[2] = std::byte(0x80);
-  ExpectThrows([&] {
-    gufo::core::kv_codec::ValidateRow(packed, 32, RowCodec::kQ8_0);
-  }, "q8_0 rejects a -128 code");
+  ExpectThrows(
+      [&] { gufo::core::kv_codec::ValidateRow(packed, 32, RowCodec::kQ8_0); },
+      "q8_0 rejects a -128 code");
 
   // A negative scale is not a valid q8_0 scale.
   auto negative = Bytes(RowBytes(32, RowCodec::kQ8_0));
@@ -238,18 +239,18 @@ void TestQ8RejectsBadPayloads() {
   gufo::core::kv_codec::EncodeRow(zeros, RowCodec::kQ8_0, negative);
   negative[0] = std::byte(0x00);
   negative[1] = std::byte(0x80);
-  ExpectThrows([&] {
-    gufo::core::kv_codec::ValidateRow(negative, 32, RowCodec::kQ8_0);
-  }, "q8_0 rejects a negative scale");
+  ExpectThrows(
+      [&] { gufo::core::kv_codec::ValidateRow(negative, 32, RowCodec::kQ8_0); },
+      "q8_0 rejects a negative scale");
 
   // A non-finite input is rejected, and the destination is unchanged.
   auto target = Bytes(RowBytes(32, RowCodec::kQ8_0));
   std::fill(target.begin(), target.end(), std::byte{0x5A});
   std::vector<float> bad(32, 1.0F);
   bad[7] = std::numeric_limits<float>::infinity();
-  ExpectThrows([&] {
-    gufo::core::kv_codec::EncodeRow(bad, RowCodec::kQ8_0, target);
-  }, "q8_0 rejects a non-finite input");
+  ExpectThrows(
+      [&] { gufo::core::kv_codec::EncodeRow(bad, RowCodec::kQ8_0, target); },
+      "q8_0 rejects a non-finite input");
   for (const auto byte : target) {
     Expect(byte == std::byte{0x5A},
            "a rejected encode leaves the destination unchanged");
@@ -322,24 +323,30 @@ void TestOverlapAndSizes() {
   std::vector<float> row(32, 1.0F);
   auto packed = Bytes(RowBytes(32, RowCodec::kQ8_0));
 
-  ExpectThrows([&] {
-    gufo::core::kv_codec::EncodeRow(row, RowCodec::kQ8_0,
-                                    std::span<std::byte>(packed).first(16));
-  }, "encode rejects a short destination");
+  ExpectThrows(
+      [&] {
+        gufo::core::kv_codec::EncodeRow(row, RowCodec::kQ8_0,
+                                        std::span<std::byte>(packed).first(16));
+      },
+      "encode rejects a short destination");
 
-  ExpectThrows([&] {
-    std::vector<float> out(16);
-    gufo::core::kv_codec::DecodeRow(packed, RowCodec::kQ8_0, out);
-  }, "decode rejects a short destination");
+  ExpectThrows(
+      [&] {
+        std::vector<float> out(16);
+        gufo::core::kv_codec::DecodeRow(packed, RowCodec::kQ8_0, out);
+      },
+      "decode rejects a short destination");
 
   // A buffer that aliases itself is rejected.
   std::vector<float> aliased(32, 1.0F);
-  ExpectThrows([&] {
-    gufo::core::kv_codec::EncodeRow(
-        aliased, RowCodec::kF16,
-        std::span<std::byte>(reinterpret_cast<std::byte*>(aliased.data()),
-                             aliased.size() * sizeof(float)));
-  }, "encode rejects overlapping buffers");
+  ExpectThrows(
+      [&] {
+        gufo::core::kv_codec::EncodeRow(
+            aliased, RowCodec::kF16,
+            std::span<std::byte>(reinterpret_cast<std::byte*>(aliased.data()),
+                                 aliased.size() * sizeof(float)));
+      },
+      "encode rejects overlapping buffers");
 }
 
 void TestF16Rows() {
@@ -355,9 +362,11 @@ void TestF16Rows() {
   // A value that overflows F16 is rejected.
   std::vector<float> huge{1.0e30F};
   auto huge_bytes = Bytes(RowBytes(1, RowCodec::kF16));
-  ExpectThrows([&] {
-    gufo::core::kv_codec::EncodeRow(huge, RowCodec::kF16, huge_bytes);
-  }, "f16 rejects a value that overflows");
+  ExpectThrows(
+      [&] {
+        gufo::core::kv_codec::EncodeRow(huge, RowCodec::kF16, huge_bytes);
+      },
+      "f16 rejects a value that overflows");
 }
 
 }  // namespace

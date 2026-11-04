@@ -335,16 +335,14 @@ public:
       if (name.empty() || name.find_first_of("<>\"=\r\n") != std::string::npos)
         return {};
       // The loose route handles literal names outside this simple subset.
-      if (qwen_like &&
-          (std::string_view(" \t\f\v").find(name.front()) !=
-               std::string_view::npos ||
-           std::string_view(" \t\f\v").find(name.back()) !=
-               std::string_view::npos))
+      if (qwen_like && (std::string_view(" \t\f\v").find(name.front()) !=
+                            std::string_view::npos ||
+                        std::string_view(" \t\f\v").find(name.back()) !=
+                            std::string_view::npos))
         return {};
-      const std::string close =
-          laguna ? "</arg_value>"
-                 : qwen  ? "\n</parameter>\n"
-                         : "</｜DSML｜parameter>";
+      const std::string close = laguna ? "</arg_value>"
+                                : qwen ? "\n</parameter>\n"
+                                       : "</｜DSML｜parameter>";
       const std::string close_literal = qwen_like ? close : close + "\n";
       const auto* schema = NativeSchema(original);
       const auto* type = schema ? schema->find("type") : nullptr;
@@ -443,10 +441,10 @@ public:
         value = Visit(original, 1);
       }
       const auto open = laguna ? "<arg_key>" + name + "</arg_key><arg_value>"
-                        : qwen  ? "<parameter=" + name + ">\n"
-                                : "<｜DSML｜parameter name=\"" + name +
-                                      "\" string=\"" +
-                                      (string ? "true" : "false") + "\">";
+                        : qwen ? "<parameter=" + name + ">\n"
+                               : "<｜DSML｜parameter name=\"" + name +
+                                     "\" string=\"" +
+                                     (string ? "true" : "false") + "\">";
       members.emplace_back(name,
                            Seq({Literal(open), value, Literal(close_literal)}));
     }
@@ -470,10 +468,9 @@ public:
     const bool qwen = format == Format::kQwen;
     const bool laguna = format == Format::kLaguna;
     const bool qwen_like = qwen || laguna;
-    const std::string close =
-        laguna ? "</arg_value>"
-               : qwen  ? "\n</parameter>\n"
-                       : "</｜DSML｜parameter>";
+    const std::string close = laguna ? "</arg_value>"
+                              : qwen ? "\n</parameter>\n"
+                                     : "</｜DSML｜parameter>";
     const std::string close_literal = qwen_like ? close : close + "\n";
     // A root reference is followed as ToolParameters does; other roots that
     // are not objects declare no parameters, as in llama.cpp.
@@ -507,8 +504,9 @@ public:
       // names, including surrounding spaces, are written literally as llama.cpp
       // does; the parser matches declared names exactly.
       if (name.empty() ||
-          name.find_first_of(laguna ? "<>\r\n" : qwen ? ">\r\n" : "\"\r\n") !=
-              std::string::npos) {
+          name.find_first_of(laguna ? "<>\r\n"
+                             : qwen ? ">\r\n"
+                                    : "\"\r\n") != std::string::npos) {
         required.erase(name);
         continue;
       }
@@ -661,21 +659,20 @@ private:
     }
     const auto name = Lexeme(
         JsonSchemaLexeme::RawString(name_schema, qwen_like ? ">" : "\""));
-    const std::string close =
-        laguna ? "</arg_value>"
-               : qwen  ? "\n</parameter>\n"
-                       : "</｜DSML｜parameter>";
+    const std::string close = laguna ? "</arg_value>"
+                              : qwen ? "\n</parameter>\n"
+                                     : "</｜DSML｜parameter>";
     const std::string close_literal = qwen_like ? close : close + "\n";
     const auto raw = Optional(
         Lexeme(JsonSchemaLexeme::RawString(json::Value::object(), close)));
     const auto value = laguna ? Seq({Literal("</arg_key><arg_value>"), raw})
-                   : qwen  ? Seq({Literal(">\n"), raw})
-                           : Alt({Seq({Literal("\" string=\"true\">"), raw}),
-                                  Seq({Literal("\" string=\"false\">"),
-                                       GenericValue(kMaxDepth)})});
+                       : qwen ? Seq({Literal(">\n"), raw})
+                              : Alt({Seq({Literal("\" string=\"true\">"), raw}),
+                                     Seq({Literal("\" string=\"false\">"),
+                                          GenericValue(kMaxDepth)})});
     return Seq({Literal(laguna ? "<arg_key>"
-                                : qwen  ? "<parameter="
-                                        : "<｜DSML｜parameter name=\""),
+                        : qwen ? "<parameter="
+                               : "<｜DSML｜parameter name=\""),
                 name, value, Literal(close_literal)});
   }
 
@@ -2032,7 +2029,7 @@ std::shared_ptr<const JsonConstraint> JsonConstraint::WithTools(
   const auto end = literal(format == ToolFormat::kJson ? "}</tool_call>"
                            : deepseek                  ? "</｜DSML｜invoke>"
                            : laguna                    ? "</tool_call>"
-                                      : "</function>\n</tool_call>");
+                                    : "</function>\n</tool_call>");
   const auto calls = static_cast<std::uint32_t>(grammar->rules_.size());
   grammar->rules_.push_back({});
   // In tool-only mode ordinary text remains unconstrained until a canonical
@@ -2126,8 +2123,8 @@ std::shared_ptr<const JsonConstraint> JsonConstraint::WithTools(
   if (format != ToolFormat::kJson) {
     grammar->reasoning_tool_prefix_ =
         deepseek ? "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\""
-        : laguna   ? "<tool_call>"
-                   : "<tool_call>\n<function=";
+        : laguna ? "<tool_call>"
+                 : "<tool_call>\n<function=";
     grammar->reasoning_tool_root_ = grammar->rules_.size();
     grammar->rules_.push_back({});
   }
@@ -2143,8 +2140,8 @@ std::shared_ptr<const JsonConstraint> JsonConstraint::WithTools(
       grammar->rules_[calls].push_back({begin, found->second, end, after});
       if (format != ToolFormat::kJson) {
         const auto named = literal(deepseek ? name + "\">\n"
-                                      : laguna   ? name
-                                                 : name + ">\n");
+                                   : laguna ? name
+                                            : name + ">\n");
         grammar->rules_[grammar->reasoning_tool_root_].push_back(
             {named, found->second, end, after});
       }
@@ -2185,8 +2182,8 @@ std::shared_ptr<const JsonConstraint> JsonConstraint::WithTools(
     grammar->rules_[calls].push_back({begin, root, end, after});
     if (format != ToolFormat::kJson) {
       const auto named = literal(deepseek ? name + "\">\n"
-                                    : laguna   ? name
-                                               : name + ">\n");
+                                 : laguna ? name
+                                          : name + ">\n");
       grammar->rules_[grammar->reasoning_tool_root_].push_back(
           {named, root, end, after});
     }

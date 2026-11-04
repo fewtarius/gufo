@@ -45,15 +45,15 @@ struct QwenCompactKv {
 /// The FP32 plane is the independent validation reference and the FP16 and
 /// q8_0 planes are the canonical token-major caches.
 [[nodiscard]] inline std::size_t QwenKvRowBytes(QwenKvCacheStorage storage,
-                                                 std::uint32_t elements) {
+                                                std::uint32_t elements) {
   switch (storage) {
     case QwenKvCacheStorage::kFp32:
       return static_cast<std::size_t>(elements) * sizeof(float);
     case QwenKvCacheStorage::kFp16:
       return static_cast<std::size_t>(elements) * sizeof(std::uint16_t);
     case QwenKvCacheStorage::kQ8_0:
-      return core::kv_codec::RowBytes(
-          elements, core::kv_codec::RowCodec::kQ8_0);
+      return core::kv_codec::RowBytes(elements,
+                                      core::kv_codec::RowCodec::kQ8_0);
   }
   throw std::invalid_argument("unknown Qwen KV cache storage");
 }

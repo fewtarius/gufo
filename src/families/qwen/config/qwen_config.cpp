@@ -69,11 +69,12 @@ std::optional<core::ModelConfig> ExtractQwenConfig(
   if (auto val = reader.GetMetadataUint32(prefix + "expert_used_count")) {
     config.num_experts_used = *val;
   }
-  if (auto val = reader.GetMetadataUint32(prefix + "expert_feed_forward_length")) {
+  if (auto val =
+          reader.GetMetadataUint32(prefix + "expert_feed_forward_length")) {
     config.expert_ff = *val;
   }
-  if (auto val =
-          reader.GetMetadataUint32(prefix + "expert_shared_feed_forward_length")) {
+  if (auto val = reader.GetMetadataUint32(
+          prefix + "expert_shared_feed_forward_length")) {
     config.shared_expert_ff = *val;
   }
   // A MoE model has no dense feed-forward, so the intermediate size

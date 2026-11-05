@@ -1239,7 +1239,7 @@ std::shared_ptr<ext::TextModelRunner> CreateQwenTextRunner(
   if (options.max_context == 0) {
     const std::uint32_t native = max_context;
     std::uint32_t chosen = native;
-    const auto policy = hip::QwenExecutionPolicy::Production();
+    const auto policy = SelectExecutionPolicy();
     const auto footprint = [&](std::uint32_t context) {
       const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
           model->GetConfig(), context, policy);

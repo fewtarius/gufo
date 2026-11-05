@@ -362,37 +362,9 @@ struct TextRunnerPool::Request::Impl {
           std::span<const TextRunnerToken>(prompt).first(prefill_offset));
     }
     ngram_baseline = runner->NgramRows(state);
-    const auto capabilities = runner->Descriptor().capabilities;
     // Component adapters supply their own pass boundaries below. Building the
     // generic plan first only repeats prefix lookups before discarding it.
-    if (!lease.component() && capabilities.incremental_prefill &&
-        capabilities.prefix_reuse && capabilities.snapshot &&
-        capabilities.fork) {
-      // A reused frontier already bounds the work lost on an edit. Do not
-      // split a short continuation just to copy a nearby grid checkpoint.
-      // Cold long prompts still retain the last grid point for late edits.
-      // A grid point just before the prompt end saves little on an edit but
-      // would split the final prefill pass and store another snapshot.
-      const std::size_t interval =
-          std::max<std::size_t>(capabilities.prefill_grid_tokens, 2048);
-      constexpr std::size_t tail = 128;
-      const auto grid_points = (prompt.size() - 1) / interval;
-      const auto count =
-          std::min(grid_points, TextRunnerPool::Impl::kIntermediateCheckpoints);
-      for (std::size_t point = 1; point <= count; ++point) {
-        const auto position = grid_points * point / count * interval;
-        if (position > prefill_offset &&
-            position - prefill_offset >= interval &&
-            prompt.size() - position > tail &&
-            position != snapshot_tokens.size() &&
-            position != stable_prefix_position &&
-            !lease.HasSnapshotFor(
-                std::span<const TextRunnerToken>(prompt).first(position)))
-          checkpoints.push_back(position);
-      }
-    }
-    if (lease.component())
-      checkpoints = lease->PlannedCaptures(cache_prefix_tokens);
+    checkpoints = lease->PlannedCaptures(cache_prefix_tokens);
     if (alignment > 1) {
       for (auto& position : checkpoints)
         position = Aligned(position);

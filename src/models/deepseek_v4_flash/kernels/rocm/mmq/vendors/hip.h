@@ -12,7 +12,10 @@
 
 
 #define __shfl_sync(mask, var, laneMask, width) __shfl(var, laneMask, width)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 #define __shfl_down_sync(mask, var, delta, ...) __shfl_down(var, delta, ##__VA_ARGS__)
+#pragma clang diagnostic pop
 #define __shfl_up_sync(mask, var, laneMask, width) __shfl_up(var, laneMask, width)
 #define __shfl_xor_sync(mask, var, laneMask, width) __shfl_xor(var, laneMask, width)
 #define __all_sync(mask, var) __all(var)

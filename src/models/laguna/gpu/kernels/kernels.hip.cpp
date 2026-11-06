@@ -1013,8 +1013,11 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
         for (int ks = 0; ks < 8; ++ks) {
           const v16h a_max = LoadFragGlobal(base + ks * 16);
           const v16h a_min = LoadFragGlobal(base + 128 + ks * 16);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-builtins"
           acc = Wmma(a_max, __builtin_elementwise_max(q_frag[ks], zero16), acc);
           acc = Wmma(a_min, __builtin_elementwise_min(q_frag[ks], zero16), acc);
+#pragma clang diagnostic pop
         }
 #pragma unroll
         for (int i = 0; i < 8; ++i) {

@@ -75,7 +75,7 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
   if (hipMalloc(&d_src, size) != hipSuccess ||
       hipMalloc(&d_dst, size) != hipSuccess) {
     if (d_src) {
-      hipFree(d_src);
+      (void)hipFree(d_src);
     }
     BandwidthPathResult alloc_fail;
     alloc_fail.backend = "hip";
@@ -88,8 +88,8 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
 
   hipEvent_t start_event = nullptr;
   hipEvent_t stop_event = nullptr;
-  hipEventCreate(&start_event);
-  hipEventCreate(&stop_event);
+  (void)hipEventCreate(&start_event);
+  (void)hipEventCreate(&stop_event);
 
   // 1. Host-to-Device (H2D)
   {
@@ -101,17 +101,17 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
     path.warmup_runs = options.warmup;
 
     for (std::uint32_t w = 0; w < options.warmup; ++w) {
-      hipMemcpy(d_src, h_src.data(), size, hipMemcpyHostToDevice);
+      (void)hipMemcpy(d_src, h_src.data(), size, hipMemcpyHostToDevice);
     }
 
     for (detail::BandwidthRun run(options, path); run.ShouldContinue();) {
-      hipEventRecord(start_event, nullptr);
-      hipMemcpy(d_src, h_src.data(), size, hipMemcpyHostToDevice);
-      hipEventRecord(stop_event, nullptr);
-      hipEventSynchronize(stop_event);
+      (void)hipEventRecord(start_event, nullptr);
+      (void)hipMemcpy(d_src, h_src.data(), size, hipMemcpyHostToDevice);
+      (void)hipEventRecord(stop_event, nullptr);
+      (void)hipEventSynchronize(stop_event);
 
       float elapsed_ms = 0.0F;
-      hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
+      (void)hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
       const double elapsed_sec = static_cast<double>(elapsed_ms) / 1000.0;
       run.Record(elapsed_sec, static_cast<double>(size));
     }
@@ -131,17 +131,17 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
     path.warmup_runs = options.warmup;
 
     for (std::uint32_t w = 0; w < options.warmup; ++w) {
-      hipMemcpy(d_dst, d_src, size, hipMemcpyDeviceToDevice);
+      (void)hipMemcpy(d_dst, d_src, size, hipMemcpyDeviceToDevice);
     }
 
     for (detail::BandwidthRun run(options, path); run.ShouldContinue();) {
-      hipEventRecord(start_event, nullptr);
-      hipMemcpy(d_dst, d_src, size, hipMemcpyDeviceToDevice);
-      hipEventRecord(stop_event, nullptr);
-      hipEventSynchronize(stop_event);
+      (void)hipEventRecord(start_event, nullptr);
+      (void)hipMemcpy(d_dst, d_src, size, hipMemcpyDeviceToDevice);
+      (void)hipEventRecord(stop_event, nullptr);
+      (void)hipEventSynchronize(stop_event);
 
       float elapsed_ms = 0.0F;
-      hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
+      (void)hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
       const double elapsed_sec = static_cast<double>(elapsed_ms) / 1000.0;
       // D2D reads size bytes and writes size bytes = 2 * size
       run.Record(elapsed_sec, static_cast<double>(size) * 2);
@@ -162,19 +162,19 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
     path.warmup_runs = options.warmup;
 
     for (std::uint32_t w = 0; w < options.warmup; ++w) {
-      hipMemcpy(h_dst.data(), d_dst, size, hipMemcpyDeviceToHost);
+      (void)hipMemcpy(h_dst.data(), d_dst, size, hipMemcpyDeviceToHost);
     }
 
     bool sentinel_ok = true;
     for (detail::BandwidthRun run(options, path); run.ShouldContinue();) {
       std::fill(h_dst.begin(), h_dst.end(), 0);
-      hipEventRecord(start_event, nullptr);
-      hipMemcpy(h_dst.data(), d_dst, size, hipMemcpyDeviceToHost);
-      hipEventRecord(stop_event, nullptr);
-      hipEventSynchronize(stop_event);
+      (void)hipEventRecord(start_event, nullptr);
+      (void)hipMemcpy(h_dst.data(), d_dst, size, hipMemcpyDeviceToHost);
+      (void)hipEventRecord(stop_event, nullptr);
+      (void)hipEventSynchronize(stop_event);
 
       float elapsed_ms = 0.0F;
-      hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
+      (void)hipEventElapsedTime(&elapsed_ms, start_event, stop_event);
       const double elapsed_sec = static_cast<double>(elapsed_ms) / 1000.0;
       run.Record(elapsed_sec, static_cast<double>(size));
 
@@ -189,10 +189,10 @@ std::vector<BandwidthPathResult> MeasureHipBandwidth(
     results.push_back(std::move(path));
   }
 
-  hipEventDestroy(start_event);
-  hipEventDestroy(stop_event);
-  hipFree(d_src);
-  hipFree(d_dst);
+  (void)hipEventDestroy(start_event);
+  (void)hipEventDestroy(stop_event);
+  (void)hipFree(d_src);
+  (void)hipFree(d_dst);
 
   return results;
 }

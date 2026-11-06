@@ -116,11 +116,14 @@ inline constexpr float kQ8MaxHalf = 65504.0F;
     const Q8KvBlock* block, std::uint32_t offset) {
   const float scale = __half2float(block->scale);
   __half out[8];
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #pragma unroll
   for (std::uint32_t i = 0; i < 8; ++i) {
     const float value = static_cast<float>(block->values[offset + i]) * scale;
     out[i] = __float2half(value);
   }
+#pragma GCC diagnostic pop
   uint4 packed;
   __builtin_memcpy(&packed, out, sizeof(packed));
   return packed;

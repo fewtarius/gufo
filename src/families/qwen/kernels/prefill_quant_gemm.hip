@@ -562,7 +562,7 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
     // unrolled BK=4 stage, the scheduler can move the LDS operand reads of all
     // blocks above the WMMAs of the first block. Clang 23 does this. Then the
     // kernel needs more than 256 VGPRs and spills.
-#pragma unroll(BK <= 2 ? BK : 1)
+#pragma unroll BK <= 2 ? BK : 1
     for (int kb = 0; kb < BK; ++kb) {
       int32x4_t a0[kWaveRowTiles];
       int32x4_t a1[kWaveRowTiles];

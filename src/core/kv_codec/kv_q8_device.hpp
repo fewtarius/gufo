@@ -116,7 +116,9 @@ inline constexpr float kQ8MaxHalf = 65504.0F;
     const Q8KvBlock* block, std::uint32_t offset) {
   const float scale = __half2float(block->scale);
   __half out[8];
+#if defined(__HIP_DEVICE_COMPILE__)
 #pragma unroll
+#endif
   for (std::uint32_t i = 0; i < 8; ++i) {
     const float value = static_cast<float>(block->values[offset + i]) * scale;
     out[i] = __float2half(value);

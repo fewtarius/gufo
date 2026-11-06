@@ -299,7 +299,7 @@ bool Executor::MtpForwardBatch(std::span<const MtpBatchItem> items,
       // same invariant projections, then stop before queries, attention,
       // the output projection and FFN whose residual would be discarded.
       auto kv = l.attn_qkv;
-      const TensorRef layout{.type = kv.type, .cols = kv.cols};
+      const TensorRef layout{.type = kv.type, .cols = kv.cols, .name = {}};
       kv.data = static_cast<std::uint8_t*>(kv.data) +
                 std::size_t{2} * c.AttentionQDim() * layout.RowBytes();
       kv.rows = 2 * c.AttentionKvDim();

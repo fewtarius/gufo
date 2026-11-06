@@ -90,7 +90,7 @@ Transcription ParseTranscription(
 
   const std::size_t tag = decoded.find(kAsrTextTag);
   if (tag == std::string_view::npos) {
-    return {.text = Trim(decoded)};
+    return {.language = {}, .text = Trim(decoded)};
   }
   const std::string_view metadata = decoded.substr(0, tag);
   std::string language;

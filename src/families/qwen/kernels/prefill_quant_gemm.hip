@@ -392,6 +392,8 @@ __device__ __forceinline__ int32x8_t Wmma_16x16x16_iu8(int32x4_t a, int32x4_t b,
   return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32(true, a, true, b, c,
                                                     SubOpsel);
 #else
+  (void)a;
+  (void)b;
   return c;
 #endif
 }
@@ -562,7 +564,10 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
     // unrolled BK=4 stage, the scheduler can move the LDS operand reads of all
     // blocks above the WMMAs of the first block. Clang 23 does this. Then the
     // kernel needs more than 256 VGPRs and spills.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcuda-compat"
 #pragma unroll(BK <= 2 ? BK : 1)
+#pragma clang diagnostic pop
     for (int kb = 0; kb < BK; ++kb) {
       int32x4_t a0[kWaveRowTiles];
       int32x4_t a1[kWaveRowTiles];

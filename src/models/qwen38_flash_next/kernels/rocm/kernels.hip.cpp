@@ -126,6 +126,10 @@ __device__ __forceinline__ float RowElement(const void* row, WeightType type,
           static_cast<const void*>(blk + 2))[i % 32];
       return __half2float(d) * static_cast<float>(q);
     }
+    case WeightType::kQ5_1:
+    case WeightType::kQ4_K:
+    case WeightType::kQ5_K:
+      break;
   }
   return 0.0f;
 }
@@ -140,6 +144,10 @@ __device__ __forceinline__ std::size_t RowBytes(WeightType type,
       return static_cast<std::size_t>(k) * 2;
     case WeightType::kQ8_0:
       return static_cast<std::size_t>(k / 32) * 34;
+    case WeightType::kQ5_1:
+    case WeightType::kQ4_K:
+    case WeightType::kQ5_K:
+      break;
   }
   return 0;
 }
@@ -852,7 +860,6 @@ __global__ void HcCombineVec4Kernel(
   }
   float* dst = res + static_cast<std::size_t>(t) * hc_dim;
   const float* src = block_out + static_cast<std::size_t>(t) * hidden;
-  const std::uint32_t chunks = static_cast<std::uint32_t>(hc_dim / 4);
   float4 v[kMaxChunks];
   float ss[kStreams] = {0.0F, 0.0F, 0.0F, 0.0F};
 #pragma unroll
@@ -3935,7 +3942,7 @@ __global__ void PenaltyArgmaxFinishKernel(const float* logits,
   best = PenaltyArgmaxBlock(best, shared);
   if (threadIdx.x == 0)
     out[row] =
-        best.index < vocab
+        static_cast<std::uint32_t>(best.index) < vocab
             ? ArgmaxCandidate{logits[std::size_t(row) * vocab + best.index],
                               best.index}
             : ArgmaxCandidate{NAN, -1};
@@ -5446,7 +5453,6 @@ __launch_bounds__(256) __global__ void RoutedF16GEMMKernel(
   constexpr bool kQ5 = kType == WeightType::kQ5_1;
   constexpr bool kQ5K = kType == WeightType::kQ5_K;
   constexpr bool kQ8 = kType == WeightType::kQ8_0;
-  constexpr bool kKQuant = kType == WeightType::kQ4_K || kQ5K;
   // 16-byte code chunks per row and stage: Q4_K's nibble pair and Q5_1's
   // two nibble blocks are two, Q8_0's two byte blocks are four.
   constexpr int kChunks = kQ8 ? 2 * BK : BK;
@@ -8156,7 +8162,8 @@ __launch_bounds__(256) __global__ void DenseF16GEMMKernel(
 #pragma unroll
         for (int j = 0; j < kWaveTokTiles; ++j) {
           if constexpr (partial) {
-            if (token_of(((wave_tok * kWaveTokTiles) + j) * 16) >= batch)
+            if (static_cast<std::size_t>(
+                    token_of(((wave_tok * kWaveTokTiles) + j) * 16)) >= batch)
               continue;
           }
           const int t = (((wave_tok * kWaveTokTiles) + j) * 16) + sub_lane;
@@ -8189,7 +8196,7 @@ __launch_bounds__(256) __global__ void DenseF16GEMMKernel(
     }
   };
   if constexpr (kSsmConv || kStrided) {
-    if (t_block + BN <= batch)
+    if (static_cast<std::size_t>(t_block + BN) <= batch)
       accumulate.template operator()<false>();
     else
       accumulate.template operator()<true>();
@@ -8445,7 +8452,8 @@ __launch_bounds__(256) __global__ void DenseF16GEMMKernel(
               if (row >= m)
                 continue;
               const float4 current = src[v];
-              if (row >= channels || tok_l < 3 || tok_l >= kOutputTokens - 3 ||
+              if (row >= channels || tok_l < 3 ||
+                  tok_l >= static_cast<int>(kOutputTokens) - 3 ||
                   tok + 3 >= batch ||
                   CheckpointHistoryRow(checkpoint_rows, tok)) {
                 *reinterpret_cast<float4*>(y + tok * m + row) = current;

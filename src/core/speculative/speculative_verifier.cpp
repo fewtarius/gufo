@@ -345,6 +345,7 @@ void SpeculativeVerifier::PrepareTargetOnlyStep(PreparedStep& prepared,
       .next_token = next,
       .next_token_logits = std::move(logits),
       .hit_eos = IsStopToken(next, request.eos_id),
+      .logprobs = {},
   };
   if (request.sampler.config().logprobs)
     prepared.immediate->logprobs.push_back(
@@ -522,7 +523,8 @@ SpeculativeVerifier::ProcessVerificationChunk(
     StepResult result{.emitted_tokens = {next},
                       .next_token = next,
                       .next_token_logits = std::move(logits),
-                      .hit_eos = IsStopToken(next, eos_id)};
+                      .hit_eos = IsStopToken(next, eos_id),
+                      .logprobs = {}};
     if (sampler.config().logprobs)
       result.logprobs.push_back(*sampling::CollectLogprobs(
           prepared.capture_logits ? std::span<const float>(verification.logits)
@@ -841,7 +843,8 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
                       .draft_count = 0,
                       .next_token = next,
                       .next_token_logits = std::move(next_logits),
-                      .hit_eos = hit_eos};
+                      .hit_eos = hit_eos,
+                      .logprobs = {}};
     if (logprobs)
       result.logprobs.push_back(*sampling::CollectLogprobs(
           target_executor_->CopyLastLogits(), next, logprobs));
@@ -870,7 +873,8 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
                       .draft_count = 0,
                       .next_token = next,
                       .next_token_logits = std::move(next_logits),
-                      .hit_eos = hit_eos};
+                      .hit_eos = hit_eos,
+                      .logprobs = {}};
     if (logprobs)
       result.logprobs.push_back(*sampling::CollectLogprobs(
           target_executor_->CopyLastLogits(), next, logprobs));

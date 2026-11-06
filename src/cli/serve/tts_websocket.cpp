@@ -39,7 +39,9 @@ HttpResponse HandleTtsWebSocket(const HttpRequest& request,
       body["input"] = text;
       HttpRequest speech{.method = "POST",
                          .path = "/v1/audio/speech",
+                         .query = {},
                          .body = body.dump(),
+                         .headers = {},
                          .is_cancelled = [&] { return socket.cancelled(); }};
       auto validation = ValidateAudioTtsRequest(speech, service);
       if (validation.status != 200) {
@@ -169,7 +171,10 @@ HttpResponse HandleTtsWebSocket(const HttpRequest& request,
           auto validation =
               ValidateAudioTtsRequest(HttpRequest{.method = "POST",
                                                   .path = "/v1/audio/speech",
-                                                  .body = next.dump()},
+                                                  .query = {},
+                                                  .body = next.dump(),
+                                                  .headers = {},
+                                                  .is_cancelled = {}},
                                       service);
           if (validation.status != 200)
             throw std::invalid_argument(validation.body);

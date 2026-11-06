@@ -347,6 +347,7 @@ HttpResponse Transcribe(const HttpRequest& request, AsrService& service) {
               .context = context,
               .language = language,
               .max_new_tokens = maximum_tokens,
+              .pcm16k = {},
               .on_text = progress,
           };
           ext::TranscriptionResult result;
@@ -388,6 +389,8 @@ HttpResponse Transcribe(const HttpRequest& request, AsrService& service) {
                               ? std::nullopt
                               : std::optional<std::string>(language->body),
               .max_new_tokens = maximum_tokens,
+              .pcm16k = {},
+              .on_text = {},
           },
           request.is_cancelled, &result, &error)) {
     if (request.is_cancelled && request.is_cancelled()) {

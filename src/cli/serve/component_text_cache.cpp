@@ -545,6 +545,7 @@ struct ComponentTextCache::Impl {
         .compatibility = digest,
         .input = checkpoint->Input(),
         .tokens = {checkpoint->Tokens().begin(), checkpoint->Tokens().end()},
+        .components = {},
         .purpose = checkpoint->Purpose(),
         .rank = checkpoint->Rank()};
     std::vector<cache::PersistenceSource> sources;
@@ -575,7 +576,10 @@ struct ComponentTextCache::Impl {
     };
     for (const auto& c : checkpoint->Components()) {
       cache::DiskComponent component{.descriptor = c.descriptor,
-                                     .position = c.position};
+                                     .position = c.position,
+                                     .chunks = {},
+                                     .tail = std::nullopt,
+                                     .private_state = std::nullopt};
       if (c.private_state)
         component.private_state =
             append(*c.private_state, c.descriptor.state_bytes, true,
@@ -808,7 +812,11 @@ ComponentTextCache::Lease::Impl::CaptureDurable() {
   for (const auto& d : descriptors) {
     const auto p =
         std::ranges::find(positions, d.id, &cache::ComponentPosition::id);
-    cache::DiskComponent component{.descriptor = d, .position = *p};
+    cache::DiskComponent component{.descriptor = d,
+                                   .position = *p,
+                                   .chunks = {},
+                                   .tail = std::nullopt,
+                                   .private_state = std::nullopt};
     const auto completed =
         d.kind == cache::ComponentKind::kAppendRows
             ? p->valid_rows / d.rows_per_chunk * d.rows_per_chunk

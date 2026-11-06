@@ -91,8 +91,10 @@ private:
     // Upstream q applies temperature; request filters/penalties define p.
     // Restricting q to this shortlist changes acceptance, never the target.
     const auto distribution = sampling::BuildDistribution(
-        candidates->logits,
-        {.temperature = self.working_.config().temperature});
+        candidates->logits, {.logprobs = std::nullopt,
+                             .temperature = self.working_.config().temperature,
+                             .constraint = {},
+                             .reasoning_budget = {}});
     auto& proposal = self.proposals_[row];
     proposal = {};
     proposal.confidence = candidates->confidence;

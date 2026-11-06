@@ -331,6 +331,8 @@ int RunTranscribe(std::span<const char* const> args) {
       .language = language.empty() ? std::nullopt
                                    : std::optional<std::string>(language),
       .max_new_tokens = maximum_tokens,
+      .pcm16k = {},
+      .on_text = {},
   };
   ext::TranscriptionResult result;
   bool transcribed = true;

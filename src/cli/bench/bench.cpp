@@ -140,7 +140,7 @@ void RegisterBenchOptions(ArgParser& parser, BenchOptions& opt,
   parser.AddCustomOption(
       "", "--speculative", "none|mtp|dflash2|dspark",
       "Speculative decoding backend (default: none)", "Speculative",
-      [&opt, &speculative_explicit](std::string_view flag, std::string_view val,
+      [&opt, &speculative_explicit](std::string_view, std::string_view val,
                                     std::string* error) -> bool {
         speculative_explicit = true;
         if (val == "off" || val == "none") {

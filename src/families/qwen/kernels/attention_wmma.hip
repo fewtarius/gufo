@@ -75,6 +75,7 @@ namespace gufo::hip {
 
 // Defined in kernels/attention_tile.hip; the WMMA route reuses the same FP16
 // cache and the same pack/sync pair unchanged.
+template<std::uint32_t KvHeads>
 __global__ void PackTiledAttentionKvKernel(
     const float* __restrict__ k, const float* __restrict__ v,
     __half* __restrict__ k_cache_f16, __half* __restrict__ v_cache_f16,
@@ -147,16 +148,13 @@ template<std::uint32_t kQueryRows, std::uint32_t kKeys, bool kHeadMajor = false,
 // LLVM 24 otherwise uses 241 VGPRs for packed V, crossing the six-wave
 // allocation boundary. Keep six waves resident without changing the tiling.
 __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
-    void WmmaCausalAttention(const float* __restrict__ q,
-                             const float* __restrict__ gate,
-                             const void* __restrict__ k_cache,
-                             const void* __restrict__ v_cache,
-                             float* __restrict__ out_context,
-                             std::size_t layer_offset,
-                             std::uint32_t start_pos, std::size_t batch_size,
-                             float* __restrict__ lse_out,
-                             std::uint32_t key_begin,
-                             std::uint32_t first_query) {
+    void WmmaCausalAttention(
+        const float* __restrict__ q, const float* __restrict__ gate,
+        const void* __restrict__ k_cache, const void* __restrict__ v_cache,
+        float* __restrict__ out_context, std::size_t layer_offset,
+        std::uint32_t start_pos, std::size_t batch_size,
+        float* __restrict__ lse_out, std::uint32_t key_begin,
+        std::uint32_t first_query) {
   constexpr std::uint32_t kRowBlocks = (kQueryRows / 16) * kWmmaHeads;
   constexpr std::uint32_t kKeyBlocks = kKeys / 16;
   constexpr std::uint32_t kSTiles = kRowBlocks * kKeyBlocks;
@@ -289,10 +287,11 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
       const bool live = key_position < context_end;
 #pragma unroll
       for (std::uint32_t j = 0; j < kVRegs; ++j) {
-        dst[j] = live ? v_elements.LoadHalf8(
-                            (static_cast<std::size_t>(key_position) * kv_stride) +
-                            (j * 8))
-                      : make_uint4(0u, 0u, 0u, 0u);
+        dst[j] =
+            live ? v_elements.LoadHalf8(
+                       (static_cast<std::size_t>(key_position) * kv_stride) +
+                       (j * 8))
+                 : make_uint4(0u, 0u, 0u, 0u);
       }
     }
   };
@@ -303,11 +302,11 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
       const std::uint32_t idx = tid + (n * 256);
       const std::uint32_t key_position = key_start + (idx / (kHeadDim / 8));
       const std::uint32_t d8 = (idx % (kHeadDim / 8)) * 8;
-      dst[n] = (key_position < context_end)
-                   ? k_elements.LoadHalf8(
-                         (static_cast<std::size_t>(key_position) * kv_stride) +
-                         d8)
-                   : make_uint4(0u, 0u, 0u, 0u);
+      dst[n] =
+          (key_position < context_end)
+              ? k_elements.LoadHalf8(
+                    (static_cast<std::size_t>(key_position) * kv_stride) + d8)
+              : make_uint4(0u, 0u, 0u, 0u);
     }
   };
 
@@ -703,7 +702,7 @@ bool LaunchQwenWmmaAttention(
       // The binary16 plane only exists for the FP16 format. The q8_0 plane
       // is written by the encoder above.
       const bool binary16_plane = compact.format == QwenKvFormat::kFp16;
-      PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
+      PackTiledAttentionKvKernel<4><<<pack_grid, block_size, 0, stream>>>(
           k, v, binary16_plane ? static_cast<__half*>(compact.k) : nullptr,
           binary16_plane ? static_cast<__half*>(compact.v) : nullptr, k_cache,
           v_cache, layer_idx, start_pos, batch_size, max_context);
@@ -736,8 +735,7 @@ bool LaunchQwenWmmaAttention(
       const std::size_t query_offset =
           static_cast<std::size_t>(first) * kGqa * kHeadDim;
       const std::size_t group_offset =
-          layer_cache_offset +
-          (static_cast<std::size_t>(first) * kHeadDim);
+          layer_cache_offset + (static_cast<std::size_t>(first) * kHeadDim);
       if (compact.format == QwenKvFormat::kQ8_0) {
         PackAttentionHeads<QwenKvFormat::kQ8_0>
             <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(

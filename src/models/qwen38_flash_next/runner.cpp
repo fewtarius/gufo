@@ -561,7 +561,7 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override {
     auto& qfn = RequireQwenFlashNextState(state);
     if (qfn.position() >= max_context_) {
-      return {.stop = true, .piece = {}};
+      return {.stop = true, .piece = {}, .logprobs = {}};
     }
     const auto logits = qfn.session().Logits();
     if (logits.empty()) {
@@ -608,7 +608,8 @@ public:
     }
     auto& qfn = RequireQwenFlashNextState(state);
     if (qfn.position() >= max_context_) {
-      return {.selections = {}, .stop = true};
+      return {
+          .selections = {}, .stop = true, .terminal_logprobs = std::nullopt};
     }
     const auto stats_before = qfn.session().Statistics();
     sampling::SamplerState working_sampler = sampler;

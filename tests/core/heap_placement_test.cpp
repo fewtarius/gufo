@@ -17,6 +17,8 @@ void Expect(bool condition, const char* message) {
 
 int main() {
   using gufo::hip::ChooseWeightPlacement;
+  using gufo::hip::DispatchReserve;
+  using gufo::hip::HeapBudget;
   using gufo::hip::HeapFitsAboveReserve;
   using gufo::hip::kDispatchReserve;
   using gufo::hip::Placement;
@@ -24,13 +26,27 @@ int main() {
 
   Expect(kDispatchReserve == 4 * kGiB, "dispatch reserve is 4 GiB");
 
-  Expect(HeapFitsAboveReserve(kDispatchReserve + 100, 100),
+  // A heap with room keeps the flat reserve.
+  Expect(DispatchReserve(16 * kGiB) == kDispatchReserve,
+         "a heap with room keeps the flat reserve");
+  Expect(HeapFitsAboveReserve(16 * kGiB, 12 * kGiB),
          "exactly the reserve remains acceptable");
-  Expect(!HeapFitsAboveReserve(kDispatchReserve + 100, 101),
+  Expect(!HeapFitsAboveReserve(16 * kGiB, 12 * kGiB + 1),
          "one byte under the reserve is rejected");
-  Expect(!HeapFitsAboveReserve(kDispatchReserve - 1, 0),
-         "free memory already under the reserve is rejected");
   Expect(!HeapFitsAboveReserve(10, 11), "a request above free is rejected");
+
+  // A heap too small for the flat reserve keeps a quarter of what it has.
+  // The flat reserve alone rejected every size there, which is what made
+  // the context clamp collapse to its floor on a 26 GiB APU.
+  constexpr std::uint64_t kTight = 2 * kGiB;
+  Expect(DispatchReserve(kTight) == kTight / 4,
+         "a tight heap keeps a quarter of what is free");
+  Expect(HeapBudget(kTight) == kTight * 3 / 4,
+         "the budget is what is left after the reserve");
+  Expect(HeapFitsAboveReserve(kTight, kTight * 3 / 4),
+         "three quarters of a tight heap fits");
+  Expect(!HeapFitsAboveReserve(kTight, kTight * 3 / 4 + 1),
+         "one byte over the tight budget is rejected");
 
   // Measured heaps on a 128 GiB Strix Halo: the stock ttm.pages_limit of
   // half RAM, and ttm.pages_limit=32505856 (124 GiB).

@@ -97,10 +97,14 @@ float DotRow(const TensorRef& t, std::uint64_t e, std::uint64_t row,
 void MatVec(const TensorRef& t, std::uint64_t e, std::span<const float> x,
             std::span<float> y) {
   const auto rows = static_cast<std::int64_t>(t.rows);
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
   {
     std::vector<float> w(t.cols);
+#ifdef _OPENMP
 #pragma omp for schedule(static)
+#endif
     for (std::int64_t r = 0; r < rows; ++r) {
       DequantizeRow(t, e, static_cast<std::uint64_t>(r), w.data());
       double acc = 0.0;

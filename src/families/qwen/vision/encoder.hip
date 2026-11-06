@@ -500,7 +500,8 @@ struct Encoder::Impl {
       CheckBlas(hipblasCreate(&blas));
     CheckBlas(hipblasSetStream(blas, stream));
     lt = std::make_unique<gufo::hip::HipblasLtGemm>(
-        gufo::hip::HipblasLtGemmOptions{.ignore_environment = true});
+        gufo::hip::HipblasLtGemmOptions{.plan_database_path = {},
+                                       .ignore_environment = true});
     PinnedUpload upload(stream);
     for (const auto& tensor : reader->GetTensors()) {
       if (tensor.name == "v.patch_embd.weight" ||

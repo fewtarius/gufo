@@ -817,7 +817,6 @@ __device__ __forceinline__ v16h LoadFragGlobal(const __half* p) {
 constexpr int kWmmaKeys = 32;
 constexpr int kNb = kWmmaKeys / 16;
 constexpr int kWmmaHeadDim = 128;
-constexpr int kWmmaGroup = 8;
 constexpr int kWmmaColumns = 16;
 constexpr int kWmmaWaves = 8;
 constexpr int kWmmaThreads = kWmmaWaves * 32;
@@ -1013,8 +1012,14 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
         for (int ks = 0; ks < 8; ++ks) {
           const v16h a_max = LoadFragGlobal(base + ks * 16);
           const v16h a_min = LoadFragGlobal(base + 128 + ks * 16);
+          // The AMDGPU elementwise builtins are deprecated but still the
+          // only spelling that maps to the v_mov_b32_dpp sequence the
+          // matrix core needs.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-builtins"
           acc = Wmma(a_max, __builtin_elementwise_max(q_frag[ks], zero16), acc);
           acc = Wmma(a_min, __builtin_elementwise_min(q_frag[ks], zero16), acc);
+#pragma clang diagnostic pop
         }
 #pragma unroll
         for (int i = 0; i < 8; ++i) {
@@ -1084,7 +1089,7 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
       };
       std::uint32_t total_gt = 0;
       std::uint32_t total_eq = 0;
-      const std::uint32_t gt_off = block_scan(gt, &total_gt);
+      [[maybe_unused]] const std::uint32_t gt_off = block_scan(gt, &total_gt);
       const std::uint32_t eq_off = block_scan(eq, &total_eq);
       const std::uint32_t eq_take =
           capped_top_blocks > total_gt ? capped_top_blocks - total_gt : 0;
@@ -1477,9 +1482,9 @@ bool AttentionWmma(const __half* q, const void* k_cache, const void* v_cache,
   return true;
 }
 
-__global__ void CaptureTapKernel(float* dst, const float* x, std::uint32_t rows,
-                                 std::uint32_t hidden, std::size_t stride,
-                                 std::size_t tap_offset) {
+__global__ void CaptureTapKernel(float* dst, const float* x,
+                                 std::uint32_t /*rows*/, std::uint32_t hidden,
+                                 std::size_t stride, std::size_t tap_offset) {
   const std::uint32_t r = blockIdx.y;
   const float* src = x + static_cast<std::size_t>(r) * hidden;
   float* out = dst + r * stride + tap_offset;

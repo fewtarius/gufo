@@ -69,7 +69,7 @@ BenchStats ComputeStats(const std::vector<double>& values) {
   return {.mean = mean, .stddev = std::sqrt(variance)};
 }
 
-std::vector<tokenization::TokenId> MakeBenchmarkTokens(
+[[maybe_unused]] std::vector<tokenization::TokenId> MakeBenchmarkTokens(
     std::size_t count, std::size_t start_pos = 0) {
   std::vector<tokenization::TokenId> tokens(count);
   for (std::size_t i = 0; i < count; ++i) {
@@ -338,6 +338,7 @@ int RunQwen38FlashNextBenchmarkImpl(
           .max_context = static_cast<std::uint32_t>(required_context),
           .mtp_model_path = mtp ? options.mtp_model_path : "",
           .max_draft_tokens = std::max<std::uint32_t>(1, options.draft_tokens),
+          .vision_model_path = {},
           .rope_scaling = rope_scaling,
       },
       &error);

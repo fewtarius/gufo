@@ -80,15 +80,33 @@ struct AttentionSupportParams {
          (static_cast<std::size_t>(head_dim) + 2);
 }
 
-[[nodiscard]] constexpr bool IsTiledAttentionSupported(
+/// The layout the tiled prefill attention needs: a batch that fits the
+/// context, a head dimension it is compiled for, and an FP16 (or q8_0) K/V
+/// plane to read.
+[[nodiscard]] constexpr bool IsTiledAttentionLayoutSupported(
     const AttentionSupportParams& params) noexcept {
-  return params.batch_size != 0 &&
-         params.num_heads == kTiledAttentionQueryHeads &&
-         params.num_kv_heads == kTiledAttentionKvHeads &&
-         params.head_dim == kTiledAttentionHeadDim &&
+  return params.batch_size != 0 && params.head_dim == kTiledAttentionHeadDim &&
          static_cast<std::size_t>(params.start_pos) + params.batch_size <=
              params.max_context &&
          params.has_k_cache_f16 && params.has_v_cache_f16;
+}
+
+/// The head geometry the WMMA prefill attention is compiled for.
+[[nodiscard]] constexpr bool IsTiledAttentionSupported(
+    const AttentionSupportParams& params) noexcept {
+  return IsTiledAttentionLayoutSupported(params) &&
+         params.num_heads == kTiledAttentionQueryHeads &&
+         params.num_kv_heads == kTiledAttentionKvHeads;
+}
+
+/// The head geometry the tiled prefill attention accepts. The kernel pairs
+/// two query heads that share one KV head, so the group size must be even.
+[[nodiscard]] constexpr bool IsTiledAttentionGeometrySupported(
+    std::uint32_t num_heads, std::uint32_t num_kv_heads) noexcept {
+  if (num_heads == 0 || num_kv_heads == 0 || (num_heads % num_kv_heads) != 0) {
+    return false;
+  }
+  return ((num_heads / num_kv_heads) % 2) == 0;
 }
 
 /// The row-split recurrence needs two scratch planes and a 128 x 128 state

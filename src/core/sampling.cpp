@@ -259,7 +259,7 @@ std::optional<TokenLogprobs> CollectLogprobs(
     return TokenLogprob{
         token, (static_cast<double>(logits[token]) - maximum) - log_sum};
   };
-  TokenLogprobs result{.selected = entry(selected)};
+  TokenLogprobs result{.selected = entry(selected), .top = {}};
   if (*count) {
     std::vector<TokenId> ids(logits.size());
     for (std::size_t i = 0; i < ids.size(); ++i)

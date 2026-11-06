@@ -113,7 +113,9 @@ BatchScheduler::Outcome BatchScheduler::Run(
                 .is_cancelled = is_cancelled,
                 .embeddings = *embeddings,
                 .has_media = has_media,
-                .remaining_tokens = tokens};
+                .remaining_tokens = tokens,
+                .outcome = std::nullopt,
+                .error = {}};
   const Outcome outcome = Wait(caller, error);
   if (outcome != Outcome::kOk) {
     embeddings->clear();

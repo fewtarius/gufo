@@ -712,7 +712,7 @@ static gufo::hip::WeightAllocator *hip_model_weight_allocator(void) {
               "weights (%.2f GiB) do not fit the device heap above its "
               "%.2f GiB dispatch reserve; placing them in managed memory\n",
               (double)g_model_registered_size / 1073741824.0,
-              (double)gufo::hip::kDispatchReserve / 1073741824.0);
+              (double)g_model_weight_alloc->reserve_bytes() / 1073741824.0);
     }
   }
   return g_model_weight_alloc.get();

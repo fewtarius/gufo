@@ -636,7 +636,13 @@ void PrintServeHelp(std::string_view program_name,
 
   if (subcommand == "tts" || subcommand == "asr") {
     const bool tts = subcommand == "tts";
-    SpeechOptions options{.context = tts ? 4096U : 1024U};
+    SpeechOptions options{.model = {},
+                          .mmproj = {},
+                          .context = tts ? 4096U : 1024U,
+                          .served_model_names = {},
+                          .voice_specs = {},
+                          .voice_text_specs = {},
+                          .voice_lang_specs = {}};
     ArgParser parser(
         std::string(program_name) + " serve " + std::string(subcommand),
         tts ? "Serve Qwen3-TTS speech synthesis."
@@ -1226,7 +1232,13 @@ int RunServe(std::span<const char* const> args) {
         "model=minimax-h3 sessions=1 queue_capacity=1 weights=lazy", false);
   } else if (subcommand == "tts" || subcommand == "asr") {
     const bool is_tts = subcommand == "tts";
-    SpeechOptions options{.context = is_tts ? 4096U : 1024U};
+    SpeechOptions options{.model = {},
+                          .mmproj = {},
+                          .context = is_tts ? 4096U : 1024U,
+                          .served_model_names = {},
+                          .voice_specs = {},
+                          .voice_text_specs = {},
+                          .voice_lang_specs = {}};
     ArgParser parser("gufo serve " + subcommand,
                      is_tts ? "Serve Qwen3-TTS speech synthesis."
                             : "Serve Qwen3-ASR transcription.");
@@ -1267,6 +1279,7 @@ int RunServe(std::span<const char* const> args) {
             .projector_path = options.mmproj,
             .native_context_tokens = options.context,
             .validate_model = true,
+            .conditioning = std::nullopt,
             .model_id = PrimaryModelName(options.served_model_names),
             .model_aliases = ModelAliases(options.served_model_names),
             .voices = {},
@@ -1295,6 +1308,8 @@ int RunServe(std::span<const char* const> args) {
             .model_id = PrimaryModelName(options.served_model_names),
             .model_aliases = ModelAliases(options.served_model_names),
             .runner = {},
+            .live = {},
+            .voice = {},
         });
       } catch (const std::exception& error) {
         std::cerr << "Error loading Qwen3-ASR: " << error.what() << '\n';
@@ -1643,6 +1658,7 @@ int RunServe(std::span<const char* const> args) {
             .capacity_bytes = cache_disk_bytes,
             .staging_capacity_bytes = cache_disk_staging_bytes,
             .model_artifact_fingerprint = {},
+            .draft_model_artifact_fingerprint = {},
         },
         vision_model_path, cache_ram, enable_yarn);
     loading.stop();

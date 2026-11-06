@@ -390,7 +390,10 @@ __launch_bounds__(WM* WN* WaveSize, 1) __global__
 
     // Unroll the K blocks of a stage only if there are two. A fully unrolled
     // BK=4 stage spills with clang 23 (see W8A8BlockedWmmaGEMMKernel).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcuda-compat"
 #pragma unroll(BK <= 2 ? BK : 1)
+#pragma clang diagnostic pop
     for (int kb = 0; kb < BK; ++kb) {
       int32x4_t a0[kWaveRowTiles];
       int32x4_t a1[kWaveRowTiles];

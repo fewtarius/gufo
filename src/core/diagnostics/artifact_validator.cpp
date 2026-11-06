@@ -102,7 +102,7 @@ ValidationResult ValidateArtifactContent(std::string_view content) {
     if (root.contains("machine"))
       check_architecture(Object(root, "machine"));
     if (root.contains("canonical")) {
-      const auto& block = Object(root, "canonical");
+      const auto block = Object(root, "canonical");
       CanonicalFingerprint canonical;
       canonical.schema_version = String(block, "schemaVersion");
       canonical.cpp_standard = String(block, "cppStandard");
@@ -133,7 +133,7 @@ ValidationResult ValidateArtifactContent(std::string_view content) {
     const auto type =
         root.contains("artifactType") ? String(root, "artifactType") : "";
     if (type == "hipAllocation") {
-      const auto& summary = Object(root, "summary");
+      const auto summary = Object(root, "summary");
       if (!Boolean(summary, "allRequestedPathsReported") ||
           !Boolean(summary, "checksumsVerified") ||
           !Boolean(summary, "phasesSeparated") ||
@@ -146,7 +146,7 @@ ValidationResult ValidateArtifactContent(std::string_view content) {
       // Bandwidth artifacts reference a fingerprint rather than embedding it.
       // Recognize their structure; schemaVersion and an arbitrary hash alone
       // are not a diagnostic artifact.
-      const auto& options = Object(root, "options");
+      const auto options = Object(root, "options");
       (void)Uint(options, "warmup");
       (void)Uint(options, "repetitions");
       (void)Uint(options, "durationMs");

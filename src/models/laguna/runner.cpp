@@ -294,6 +294,7 @@ public:
                 .prefix_reuse = true,
                 .prefill_grid_tokens = 4096,
             },
+        .persistence = std::nullopt,
     };
   }
 
@@ -341,7 +342,9 @@ public:
         throw std::invalid_argument("Laguna does not support image input");
       models::laguna::ChatMessage rendered{
           std::string(tokenization::ToString(message.role)),
-          message.content + message.framing_suffix, message.thought};
+          message.content + message.framing_suffix,
+          message.thought,
+          {}};
       for (const auto& call : message.tool_calls) {
         models::laguna::ChatToolCall native;
         native.name = call.name;
@@ -436,16 +439,17 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override {
     auto& laguna = RequireLagunaState(state);
     if (laguna.position() >= max_context_)
-      return {.stop = true, .piece = {}};
+      return {.stop = true, .piece = {}, .logprobs = std::nullopt};
     const auto logits = laguna.session().Logits();
     if (logits.empty())
       throw std::runtime_error("Laguna token selection has no logits");
     const auto token = static_cast<std::int32_t>(sampler.Sample(logits));
     if (IsStop(token))
-      return {.stop = true, .token = 0, .piece = {}};
+      return {.stop = true, .token = 0, .piece = {}, .logprobs = std::nullopt};
     return {.stop = false,
             .token = static_cast<TextRunnerToken>(token),
-            .piece = std::string(tokenizer_->DecodeToken(token))};
+            .piece = std::string(tokenizer_->DecodeToken(token)),
+            .logprobs = std::nullopt};
   }
 
   void Advance(TextRunnerState& state, TextRunnerToken token) const override {
@@ -480,7 +484,8 @@ public:
     }
     auto& laguna = RequireLagunaState(state);
     if (laguna.position() >= max_context_)
-      return {.selections = {}, .stop = true};
+      return {
+          .selections = {}, .stop = true, .terminal_logprobs = std::nullopt};
     auto* drafter = laguna.session().DflashExecutor();
     // Speculation runs for greedy AND sampled targets. The prompt CLI
     // (src/cli/prompt/prompt.cpp) has always done so: it samples the
@@ -530,7 +535,8 @@ public:
         static_cast<std::int32_t>(working_sampler.Sample(anchor_logits));
     if (IsStop(anchor)) {
       sampler.CopyDrawStateFrom(working_sampler);
-      return {.selections = {}, .stop = true};
+      return {
+          .selections = {}, .stop = true, .terminal_logprobs = std::nullopt};
     }
     const std::uint32_t base = laguna.session().Position();
     // A drafter that samples needs one random value per proposal. Draw them
@@ -565,7 +571,8 @@ public:
     step.selections.push_back(
         {.stop = false,
          .token = static_cast<TextRunnerToken>(anchor),
-         .piece = std::string(tokenizer_->DecodeToken(anchor))});
+         .piece = std::string(tokenizer_->DecodeToken(anchor)),
+         .logprobs = std::nullopt});
     // Row i holds the distribution after feed[i], so row 0's distribution
     // follows the anchor: advance the tentative sampler past it before
     // sampling any row.
@@ -636,7 +643,8 @@ public:
       step.selections.push_back(
           {.stop = false,
            .token = static_cast<TextRunnerToken>(guess),
-           .piece = std::string(tokenizer_->DecodeToken(guess))});
+           .piece = std::string(tokenizer_->DecodeToken(guess)),
+           .logprobs = std::nullopt});
     }
     // Publish the tentative sampler's draw state so the next step
     // continues the same RNG stream and residual draw.
@@ -673,7 +681,8 @@ public:
           step.selections.push_back(
               {.stop = false,
                .token = static_cast<TextRunnerToken>(pending),
-               .piece = std::string(tokenizer_->DecodeToken(pending))});
+               .piece = std::string(tokenizer_->DecodeToken(pending)),
+               .logprobs = std::nullopt});
         }
       }
     } else {

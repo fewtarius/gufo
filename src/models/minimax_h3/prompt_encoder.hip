@@ -321,7 +321,8 @@ struct BatchLoadResult {
 
 // Windows HIP rejects hipHostRegister on file mapping views, so there the
 // interval is read into mapped pinned memory that the GPU reads the same way.
-bool ReadIntervalPinned(const std::filesystem::path& path, std::uint64_t offset,
+[[maybe_unused]] bool ReadIntervalPinned(const std::filesystem::path& path,
+                                    std::uint64_t offset,
                         std::size_t length, HostMapping* mapping,
                         std::string* error) {
   hipError_t status =

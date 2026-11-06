@@ -43,7 +43,8 @@ bool Covered(Coverage ranges, std::size_t end) {
   return frontier == end;
 }
 ContinuationGeometry ModelGeometry(std::uint32_t draft_stages) {
-  ContinuationGeometry geometry{.head_dim = DS4_N_HEAD_DIM,
+  ContinuationGeometry geometry{.ratios = {},
+                                .head_dim = DS4_N_HEAD_DIM,
                                 .indexer_head_dim = DS4_N_INDEXER_HEAD_DIM,
                                 .window = DS4_N_SWA,
                                 .vocabulary = DS4_N_VOCAB,

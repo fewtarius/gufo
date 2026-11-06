@@ -124,9 +124,9 @@ std::string RenderPrompt(std::string_view system, std::string_view user,
                          const ChatTemplateOptions& options) {
   std::vector<ChatMessage> messages;
   if (!system.empty()) {
-    messages.push_back({"system", std::string(system), ""});
+    messages.push_back({"system", std::string(system), "", {}});
   }
-  messages.push_back({"user", std::string(user), ""});
+  messages.push_back({"user", std::string(user), "", {}});
   return RenderPrompt(messages, options);
 }
 

@@ -56,7 +56,10 @@ HttpResponse HandleAsrWebSocket(const HttpRequest& request,
         .status = 400,
         .reason = "Bad Request",
         .body =
-            R"({"error":{"message":"unsupported realtime model or intent","code":"invalid_model"}})"};
+            R"({"error":{"message":"unsupported realtime model or intent","code":"invalid_model"}})",
+        .headers = {},
+        .streaming_body = {},
+        .log_details = {}};
   // Without an intent, models that hear and speak hold a conversation.
   if (intent.empty() && service.supports_voice())
     return HandleVoiceWebSocket(request, service);

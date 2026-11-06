@@ -330,7 +330,12 @@ std::string RandomId() {
 }
 
 HttpResponse Ok(const json::Value& v) {
-  return {.status = 200, .reason = "OK", .body = v.dump()};
+  return {.status = 200,
+          .reason = "OK",
+          .body = v.dump(),
+          .headers = {},
+          .streaming_body = {},
+          .log_details = {}};
 }
 
 json::Value UsageJson(const TextGenerationBackend::Result& result) {
@@ -379,7 +384,12 @@ HttpResponse Err(int status, const char* reason, const char* message,
   obj["type"] = type;
   obj["code"] = code;
   e["error"] = std::move(obj);
-  return {.status = status, .reason = reason, .body = e.dump()};
+  return {.status = status,
+          .reason = reason,
+          .body = e.dump(),
+          .headers = {},
+          .streaming_body = {},
+          .log_details = {}};
 }
 
 // Health, readiness and generation share one body once the device is lost:
@@ -392,7 +402,12 @@ HttpResponse DeviceLost() {
   json::Value body = json::Value::object();
   body["status"] = "device_lost";
   body["error"] = std::move(error);
-  return {.status = 503, .reason = "Service Unavailable", .body = body.dump()};
+  return {.status = 503,
+          .reason = "Service Unavailable",
+          .body = body.dump(),
+          .headers = {},
+          .streaming_body = {},
+          .log_details = {}};
 }
 
 HttpResponse NotImplemented(const HttpRequest&, TextGenerationBackend&) {
@@ -1088,6 +1103,7 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                 (void)writer("data: [DONE]\n\n");
               }
             },
+        .log_details = {},
         .stream_log = std::move(stream_log),
         .defer_stream_headers = !return_progress,
     };
@@ -1133,7 +1149,7 @@ std::optional<HttpResponse> ReadOpenAiResponseChat(
   if (auto error = ReadCompatibilityOptions(
           body, b, "max_output_tokens", max_tokens, sampling_config,
           chat->reasoning.enabled,
-          {.stream = true, .response_controls = true})) {
+          {.stop_field = {}, .stream = true, .response_controls = true})) {
     return error;
   }
   if (const auto error = ParseResponsesLogprobs(body, sampling_config))
@@ -1669,7 +1685,9 @@ HttpResponse LlamaMetrics(const HttpRequest&, TextGenerationBackend& b) {
   return {.status = 200,
           .reason = "OK",
           .body = out.str(),
-          .headers = {{"Content-Type", "text/plain; version=0.0.4"}}};
+          .headers = {{"Content-Type", "text/plain; version=0.0.4"}},
+          .streaming_body = {},
+          .log_details = {}};
 }
 
 // Numeric literals only, so the listener never depends on name resolution.
@@ -2178,8 +2196,12 @@ HttpResponse HttpServer::handle_request(const HttpRequest& req) {
   // connects.
   if (req.method == "GET" && req.path == "/voice" && asr_ &&
       asr_->supports_voice()) {
-    HttpResponse page{
-        .status = 200, .reason = "OK", .body = std::string(VoicePage())};
+    HttpResponse page{.status = 200,
+                      .reason = "OK",
+                      .body = std::string(VoicePage()),
+                      .headers = {},
+                      .streaming_body = {},
+                      .log_details = {}};
     page.headers.emplace_back("Content-Type", "text/html; charset=utf-8");
     page.headers.emplace_back("Cache-Control", "no-store");
     return page;
@@ -2524,7 +2546,12 @@ void HttpServer::handle_connection(int client_fd,
       resp = Err(400, "Bad Request", "malformed request",
                  "invalid_request_error", "bad_request");
     } else if (req.method == "OPTIONS") {
-      resp = {.status = 204, .reason = "No Content"};
+      resp = {.status = 204,
+              .reason = "No Content",
+              .body = {},
+              .headers = {},
+              .streaming_body = {},
+              .log_details = {}};
     } else {
       traced = Trace::Enabled() && IsTracedRoute(req);
       if (traced) {

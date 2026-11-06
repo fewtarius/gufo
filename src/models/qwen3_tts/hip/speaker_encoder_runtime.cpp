@@ -285,6 +285,7 @@ struct SpeakerEncoderHipRuntime::Impl {
       const std::string prefix = "blocks." + std::to_string(block);
       Res2NetWeights layer{
           .tdnn1 = LoadConv(prefix + ".tdnn1.conv", 512, 512, 1),
+          .blocks = {},
           .tdnn2 = LoadConv(prefix + ".tdnn2.conv", 512, 512, 1),
           .se1 = LoadConv(prefix + ".se_block.conv1", 512, 128, 1),
           .se2 = LoadConv(prefix + ".se_block.conv2", 128, 512, 1),

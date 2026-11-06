@@ -93,6 +93,7 @@ HttpResponse Error(int status, std::string reason, std::string message,
       .body = root.dump(),
       .headers = {},
       .streaming_body = {},
+      .log_details = {},
   };
 }
 
@@ -172,6 +173,7 @@ HttpResponse Voices(TtsService& service) {
       .body = root.dump(),
       .headers = {},
       .streaming_body = {},
+      .log_details = {},
   };
 }
 

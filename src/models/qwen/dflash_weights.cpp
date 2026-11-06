@@ -206,7 +206,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
       SetError(error_msg,
                "DFlash GGUF requires a valid rotary dimension or degenerate "
                "four-section M-RoPE layout; missing required metadata: " +
-               missing);
+                   missing);
     } else {
       SetError(error_msg,
                "DFlash GGUF is missing required metadata: " + missing);
@@ -277,8 +277,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     if (!is_causal.has_value()) {
       note_missing(prefix + "attention.causal");
     }
-    SetError(error_msg,
-             "DFlash GGUF is missing required metadata: " + missing);
+    SetError(error_msg, "DFlash GGUF is missing required metadata: " + missing);
     return std::nullopt;
   }
 

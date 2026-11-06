@@ -162,7 +162,6 @@ ToolMarkerSet ToolMarkers(
 ToolMarkerSet ReasoningToolMarkers(
     ToolMarkerSet markers,
     std::optional<sampling::JsonConstraint::ToolFormat> format) {
-  using Format = sampling::JsonConstraint::ToolFormat;
   static constexpr std::array<std::string_view, 1> qwen{
       tokenization::QwenToolSyntax::kNativeCallOpen};
   static constexpr std::array<std::string_view, 2> deepseek{
@@ -260,7 +259,12 @@ HttpResponse Error(int status, const char* reason, std::string message,
   error["type"] = "invalid_request_error";
   error["code"] = code;
   response["error"] = std::move(error);
-  return {.status = status, .reason = reason, .body = response.dump()};
+  return {.status = status,
+          .reason = reason,
+          .body = response.dump(),
+          .headers = {},
+          .streaming_body = {},
+          .log_details = {}};
 }
 
 const char* StatusReason(int status) noexcept {
@@ -291,6 +295,7 @@ HttpResponse GenerationError(const TextGenerationError& exception) {
       .body = response.dump(),
       .headers = {},
       .streaming_body = {},
+      .log_details = {},
   };
   if (exception.retryable()) {
     output.headers.emplace_back("Retry-After", "1");
@@ -3170,7 +3175,7 @@ private:
 };
 
 HttpResponse NonStreamingResponse(
-    const ParsedChatRequest& request, TextGenerationBackend& backend,
+    const ParsedChatRequest& request, TextGenerationBackend& /*backend*/,
     const std::shared_ptr<TextGenerationBackend::GenerationRequest>& generation,
     TextGenerationBackend::InitialOutputState initial_output_state) {
   const auto result = generation->Wait();
@@ -3244,7 +3249,7 @@ HttpResponse NonStreamingResponse(
 }
 
 HttpResponse StreamingResponse(
-    const ParsedChatRequest& request, TextGenerationBackend& backend,
+    const ParsedChatRequest& request, TextGenerationBackend& /*backend*/,
     std::shared_ptr<TextGenerationBackend::GenerationRequest> generation,
     TextGenerationBackend::InitialOutputState initial_output_state) {
   const std::string id = RandomId("chatcmpl-");
@@ -3441,6 +3446,7 @@ HttpResponse StreamingResponse(
               (void)writer("data: [DONE]\n\n");
             }
           },
+      .log_details = {},
       .stream_log = std::move(stream_log),
       .defer_stream_headers = !request.chat.return_progress,
   };
@@ -4230,6 +4236,7 @@ HttpResponse CreateCompatibilityResponse(
                 [run](const HttpResponse::BodyWriter& writer) {
                   (void)run(writer);
                 },
+            .log_details = {},
             .stream_log = std::move(stream_log),
             .defer_stream_headers = !chat.return_progress};
   }
@@ -4238,6 +4245,7 @@ HttpResponse CreateCompatibilityResponse(
           .reason = "OK",
           .body = response.dump(),
           .headers = {{"Server-Timing", *timing}},
+          .streaming_body = {},
           .log_details = stream_log->details};
 }
 
@@ -4304,8 +4312,12 @@ HttpResponse CountOpenAiInputTokens(const ChatRequest& chat,
       error["type"] = "server_error";
       error["code"] = "not_implemented";
       response["error"] = std::move(error);
-      return {
-          .status = 501, .reason = "Not Implemented", .body = response.dump()};
+      return {.status = 501,
+              .reason = "Not Implemented",
+              .body = response.dump(),
+              .headers = {},
+              .streaming_body = {},
+              .log_details = {}};
     }
     json::Value response = json::Value::object();
     response["object"] = "response.input_tokens";

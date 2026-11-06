@@ -172,8 +172,9 @@ private:
   std::size_t count_{0};
 };
 
-int RoutedTileCols(std::uint32_t n_tokens, std::uint32_t n_used,
-                   std::uint32_t n_experts) {
+[[maybe_unused]] int RoutedTileCols(std::uint32_t n_tokens,
+                                    std::uint32_t n_used,
+                                    std::uint32_t n_experts) {
   const std::uint32_t mean =
       std::max<std::uint32_t>(1, n_tokens * n_used / std::max(n_experts, 1U));
   for (std::uint32_t cols = kRoutedTileMin; cols < kRoutedTileMax;

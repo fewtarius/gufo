@@ -18,6 +18,7 @@ public:
       const ext::CancellationCheck& is_cancelled) override {
     Request req{
         .prompt = request.prompt,
+        .images = {},
         .width = request.width,
         .height = request.height,
         .steps = request.steps,

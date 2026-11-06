@@ -73,6 +73,7 @@ HttpResponse Error(int status, std::string reason, std::string message,
       .body = root.dump(),
       .headers = {},
       .streaming_body = {},
+      .log_details = {},
   };
 }
 
@@ -748,6 +749,7 @@ HttpResponse VideoContent(std::string_view id, const HttpRequest& request,
                    (content.media_type == "video/mp4" ? ".mp4\"" : ".ppm\"")},
           },
       .streaming_body = {},
+      .log_details = {},
   };
   if (partial) {
     response.headers.emplace_back("Content-Range",
@@ -773,6 +775,7 @@ HttpResponse DeleteVideo(std::string_view id, VideoJobService& service) {
       .body = root.dump(),
       .headers = {},
       .streaming_body = {},
+      .log_details = {},
   };
 }
 

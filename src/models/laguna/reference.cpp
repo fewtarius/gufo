@@ -395,7 +395,7 @@ void ReferenceModel::DenseFfn(std::uint32_t layer, std::span<const float> in,
   Load(P(layer, "ffn_down.weight")).MatVec(gate, out);
 }
 
-void ReferenceModel::MoEFfn(std::uint32_t layer, Session& session,
+void ReferenceModel::MoEFfn(std::uint32_t layer, Session& /*session*/,
                             std::span<const float> in,
                             std::span<float> out) const {
   const auto& cfg = config_;

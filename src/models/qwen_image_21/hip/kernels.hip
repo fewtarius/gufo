@@ -845,7 +845,8 @@ Runtime::StagedWeight Runtime::Stage(const qwen_image_21::Weight& w) {
   const auto count = w.bytes / (w.bf16 ? 2 : 4);
   if (count / rows > static_cast<std::size_t>(std::numeric_limits<int>::max()))
     throw std::runtime_error("Qwen-Image weight exceeds matrix dimensions");
-  StagedWeight target{.m = New(rows, static_cast<int>(count / rows))};
+  StagedWeight target{.m = New(rows, static_cast<int>(count / rows)),
+                      .raw = {}};
   if (!w.bf16)
     target.raw = Raw(w.bytes);
   return target;

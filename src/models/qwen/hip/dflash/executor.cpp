@@ -979,7 +979,11 @@ bool QwenDFlashGpuExecutor::SavePersistentSnapshot(
     std::span<std::uint8_t> destination, std::string* error_msg) const {
   try {
     auto snapshot = SaveSnapshot();
-    snapshot->SerializePersistent(destination);
+    const std::size_t written = snapshot->SerializePersistent(destination);
+    if (written != destination.size()) {
+      throw std::runtime_error(
+          "DFlash GPU persistent serializer returned the wrong byte count");
+    }
     return true;
   } catch (const std::exception& error) {
     if (error_msg != nullptr) {
@@ -1043,12 +1047,7 @@ bool QwenDFlashGpuExecutor::InjectTargetContext(
 bool QwenDFlashGpuExecutor::InjectTargetContextChunk(
     std::span<const float> target_features, std::uint32_t position,
     std::uint32_t num_tokens, const DFlashTrace& trace) {
-  const auto& weights = model_->GetWeights();
-  const auto& cfg = model_->GetConfig();
-  const std::size_t hidden_size = cfg.hidden_size;
   const std::size_t enc_in_dim = GetTargetFeaturesSize();
-  const std::size_t kv_dim =
-      static_cast<std::size_t>(cfg.num_key_value_heads) * cfg.head_dim;
 
   if (target_features.size() != num_tokens * enc_in_dim ||
       position + num_tokens > max_context_) {

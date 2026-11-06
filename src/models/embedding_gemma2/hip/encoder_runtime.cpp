@@ -456,7 +456,8 @@ void EncoderRuntime::Impl::Warmup() {
   std::size_t rows = 0;
   do {
     rows = GemmLt::Bucket(rows + 1, kChunkTokens);
-    const EncoderSequence filler{std::vector<std::uint32_t>(rows, 1000), {}};
+    const EncoderSequence filler{
+        std::vector<std::uint32_t>(rows, 1000), {}, {}, {}};
     unused.clear();
     RunBatch({&filler}, &unused);
   } while (rows < kChunkTokens);
@@ -737,7 +738,7 @@ bool EncoderRuntime::Embed(
   std::vector<EncoderSequence> inputs;
   inputs.reserve(sequences.size());
   for (const auto& tokens : sequences)
-    inputs.push_back({tokens, {}});
+    inputs.push_back({tokens, {}, {}, {}});
   return EmbedMultimodal(inputs, embeddings, error, is_cancelled);
 }
 

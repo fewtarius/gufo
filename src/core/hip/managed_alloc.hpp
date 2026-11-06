@@ -67,10 +67,22 @@ template<typename T>
 /// from the bytes about to be uploaded and the heap free at construction.
 class WeightAllocator {
 public:
-  explicit WeightAllocator(std::uint64_t total_weight_bytes)
-      : placement_(Decide(total_weight_bytes)) {}
+  explicit WeightAllocator(std::uint64_t total_weight_bytes) {
+    std::size_t free_bytes = 0;
+    std::size_t total_bytes = 0;
+    if (hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess) {
+      return;
+    }
+    reserve_ = DispatchReserve(free_bytes);
+    placement_ = ChooseWeightPlacement(free_bytes, total_weight_bytes);
+  }
 
   [[nodiscard]] Placement placement() const noexcept { return placement_; }
+
+  /// The dispatch reserve the placement decision held back.
+  [[nodiscard]] std::uint64_t reserve_bytes() const noexcept {
+    return reserve_;
+  }
 
   [[nodiscard]] hipError_t Allocate(void** pointer, std::size_t bytes) const {
     if (placement_ == Placement::kMalloc)
@@ -84,15 +96,8 @@ public:
   }
 
 private:
-  static Placement Decide(std::uint64_t total_weight_bytes) {
-    std::size_t free_bytes = 0;
-    std::size_t total_bytes = 0;
-    if (hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess)
-      return Placement::kManaged;
-    return ChooseWeightPlacement(free_bytes, total_weight_bytes);
-  }
-
-  Placement placement_;
+  Placement placement_{Placement::kManaged};
+  std::uint64_t reserve_{0};
 };
 
 }  // namespace gufo::hip

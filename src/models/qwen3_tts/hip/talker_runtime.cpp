@@ -1374,6 +1374,7 @@ bool TalkerHipRuntime::BuildVoiceClonePrompt(const VoiceClonePromptInput& input,
           impl_->LookupCodec(codec_pad);
       const NonIclPromptInput prompt_input{
           .hidden_size = hidden,
+          .instruction = {},
           .role = role,
           .codec = codec,
           .text = text,

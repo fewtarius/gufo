@@ -367,7 +367,7 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override {
     auto& deepseek = RequireDeepSeekState(state);
     if (deepseek.position() >= max_context_)
-      return {.stop = true, .piece = {}};
+      return {.stop = true, .piece = {}, .logprobs = {}};
     // A sampled DSpark cycle may have drawn the next token already.
     int token = deepseek.session().TakePendingDsparkToken();
     std::span<const float> logits;
@@ -404,7 +404,7 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override {
     auto& deepseek = RequireDeepSeekState(state);
     if (deepseek.position() >= max_context_)
-      return TextDecodeSelection{.stop = true, .piece = {}};
+      return TextDecodeSelection{.stop = true, .piece = {}, .logprobs = {}};
     std::string error;
     const auto logits = deepseek.session().Logits(&error);
     if (logits.empty())
@@ -433,7 +433,8 @@ public:
 
     auto& deepseek = RequireDeepSeekState(state);
     if (deepseek.position() >= max_context_)
-      return {.selections = {}, .stop = true};
+      return {
+          .selections = {}, .stop = true, .terminal_logprobs = std::nullopt};
     const auto stats_before = deepseek.session().DsparkStatistics();
     std::optional<models::deepseek_v4_flash::DsparkSamplerBridge> bridge;
     if (!sampler.config().can_use_unmodified_argmax() ||

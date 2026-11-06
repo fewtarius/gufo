@@ -174,6 +174,7 @@ CompactSnapshotLayout MakeCompactSnapshotLayout(
       .recurrent_state_storage = recurrent_state_storage,
       .conv_elements = conv_elements,
       .deltanet_elements = deltanet_elements,
+      .rope = {},
   };
   layout.live_kv_elements_per_plane = CheckedMultiply(
       CheckedMultiply(attention_layers, valid_context), kv_width);
@@ -452,6 +453,18 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
   const std::size_t maximum_weight =
       CheckedMultiply(hidden, maximum_weight_width);
   AddAllocation(maximum_weight, sizeof(hip_bfloat16), &scratch);
+
+  // The mixture-of-experts feed-forward scratch: one row per decode token
+  // or verification row.
+  if (config.IsMoe()) {
+    const std::size_t used = config.num_experts_used;
+    const std::size_t row_floats = config.num_experts + 1 + used + used + 1 +
+                                   CheckedMultiply(used, config.expert_ff) +
+                                   CheckedMultiply(used, config.hidden_size) +
+                                   config.shared_expert_ff + config.hidden_size;
+    AddAllocation(CheckedMultiply(kMoeScratchRows, row_floats), sizeof(float),
+                  &scratch);
+  }
 
   auto& state = usage.request_state_bytes;
   // One row per (layer, position) in each of the K and V planes.

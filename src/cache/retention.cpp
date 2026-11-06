@@ -579,7 +579,8 @@ bool RetentionPolicy::Admit(const RetentionRequest& r, const Capture& capture) {
       while (records_[target].checkpoint)
         ++target;
       auto& e = records_[target];
-      e = {std::move(checkpoint), entry, purpose, r.stable, ++clock_};
+      e = {std::move(checkpoint), entry, purpose, r.stable, ++clock_,
+           std::nullopt,          false, {}};
       ++size_;
       // Keep each event's exact total without recounting every retained
       // checkpoint after each individual eviction or insertion.

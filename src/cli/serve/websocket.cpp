@@ -60,7 +60,10 @@ HttpResponse UpgradeWebSocket(const HttpRequest& request,
         .status = 400,
         .reason = "Bad Request",
         .body =
-            R"({"error":{"message":"invalid WebSocket handshake","code":"invalid_websocket"}})"};
+            R"({"error":{"message":"invalid WebSocket handshake","code":"invalid_websocket"}})",
+        .headers = {},
+        .streaming_body = {},
+        .log_details = {}};
   }
   const auto input = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};

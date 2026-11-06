@@ -51,6 +51,12 @@ constexpr std::size_t kQwenMaxResumeTokens = 9;
 static_assert(kQwenMaxResumeTokens ==
               hip::QwenDFlashGpuDraftBackend::kMaxPendingRows + 1);
 
+// The context the device clamp reports lands on a 4096-token boundary so it
+// stays off the exact edge of the heap, and never falls below the floor a
+// session needs to hold a prompt and an answer.
+constexpr std::uint32_t kContextBoundary = 4096;
+constexpr std::uint32_t kMinClampContext = 1024;
+
 [[nodiscard]] inline hip::ComponentCacheHooks HipComponentCacheHooks() {
   return {[] { return ext::HostSnapshotCeilingBytes(); },
           [](std::string_view) {}, [](std::string_view) {}};
@@ -1238,7 +1244,6 @@ std::shared_ptr<ext::TextModelRunner> CreateQwenTextRunner(
   // refuse, never to reduce silently.
   if (options.max_context == 0) {
     const std::uint32_t native = max_context;
-    std::uint32_t chosen = native;
     const auto policy = SelectExecutionPolicy();
     const auto footprint = [&](std::uint32_t context) {
       const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
@@ -1249,9 +1254,32 @@ std::shared_ptr<ext::TextModelRunner> CreateQwenTextRunner(
     std::size_t heap_total = 0;
     if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
         heap_free != 0) {
-      while (chosen > 4096 &&
-             !hip::HeapFitsAboveReserve(heap_free, footprint(chosen))) {
-        chosen /= 2;
+      // The footprint grows with the context, so the largest context the
+      // heap holds is found by a binary search over the native window. The
+      // budget is what is left of the heap once the dispatch reserve is
+      // held back, so a device whose heap cannot satisfy the flat reserve
+      // still gets the context its free memory can carry.
+      const std::uint64_t budget = hip::HeapBudget(heap_free);
+      std::uint32_t best = 0;
+      std::uint32_t low = 1;
+      std::uint32_t high = native;
+      while (low <= high) {
+        const std::uint32_t middle = low + (high - low) / 2;
+        if (footprint(middle) <= budget) {
+          best = middle;
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
+      }
+      std::uint32_t chosen = native;
+      if (best < native) {
+        const std::uint32_t boundary =
+            (best / kContextBoundary) * kContextBoundary;
+        chosen = boundary >= kMinClampContext
+                     ? boundary
+                     : (best > 0 ? best : kMinClampContext);
+        chosen = std::min(chosen, native);
       }
       if (chosen != native) {
         server::Logger::Info(
@@ -1259,7 +1287,8 @@ std::shared_ptr<ext::TextModelRunner> CreateQwenTextRunner(
             "event=context_clamped native=" + std::to_string(native) +
                 " chosen=" + std::to_string(chosen) +
                 " reason=kv_cache_exceeds_free_device_memory free_mib=" +
-                std::to_string(heap_free / (1024 * 1024)) + " needed_mib=" +
+                std::to_string(heap_free / (1024 * 1024)) + " budget_mib=" +
+                std::to_string(budget / (1024 * 1024)) + " needed_mib=" +
                 std::to_string(footprint(chosen) / (1024 * 1024)));
         max_context = chosen;
       }

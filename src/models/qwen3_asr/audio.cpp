@@ -108,6 +108,7 @@ AudioBuffer DecodeWavBytes(std::span<const std::byte> bytes) {
   AudioBuffer output{
       .sample_rate = sample_rate,
       .channels = channels,
+      .samples = {},
   };
   output.samples.resize(static_cast<std::size_t>(frames) * channels);
   for (std::size_t index = 0; index < output.samples.size(); ++index) {

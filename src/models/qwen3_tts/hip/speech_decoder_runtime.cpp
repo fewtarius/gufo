@@ -454,7 +454,8 @@ struct DecoderHistory {
   }
 };
 
-std::string TransformerName(std::size_t layer, std::string_view suffix) {
+[[maybe_unused]] std::string TransformerName(std::size_t layer,
+                                             std::string_view suffix) {
   return "decoder.pre_transformer.layers." + std::to_string(layer) + "." +
          std::string(suffix);
 }
@@ -554,6 +555,7 @@ struct SpeechDecoderHipRuntime::Impl {
         .stride = 1,
         .depthwise = depthwise,
         .transpose = false,
+        .transformed_weight = {},
     };
   }
 
@@ -580,6 +582,7 @@ struct SpeechDecoderHipRuntime::Impl {
         .stride = stride,
         .depthwise = false,
         .transpose = true,
+        .transformed_weight = {},
     };
     const float* source = ResolveF32(
         store, speech_weights, std::string(prefix) + ".weight", weight_shape);

@@ -54,7 +54,8 @@ struct SessionSnapshotHeader {
   MtpLengthState draft_policy;
   std::uint32_t image_identity_bytes;
   std::uint32_t policy_concurrency;
-  std::uint32_t reserved{0};
+  /// Dynamic YaRN factor the saved keys are rotated with (1: native).
+  float yarn_factor{1.0F};
   speculative::PromptLookup<>::State lookup;
 };
 static_assert(std::is_trivially_copyable_v<SessionSnapshotHeader>);
@@ -248,6 +249,10 @@ std::uint32_t Model::PrefillCapacity() const noexcept {
 std::uint32_t Model::PrefillThroughCapacity() const noexcept {
   return std::min(kPrefillChunkTokens + kPrefillTailTokens,
                   options_.max_context);
+}
+
+std::uint32_t Model::PrefillCheckpointTail() const noexcept {
+  return executor_->PrefillCheckpointTail();
 }
 
 bool Model::HasMtp() const noexcept {
@@ -472,6 +477,7 @@ std::unique_ptr<SessionSnapshot> Session::SaveSnapshotImpl(
       .draft_policy = draft_length_.State(),
       .image_identity_bytes = static_cast<std::uint32_t>(identity.size()),
       .policy_concurrency = model_->DecodeConcurrency(),
+      .yarn_factor = model_->executor_->YarnFactor(state),
       .lookup = lookup_.Save(),
   };
   std::memcpy(out, &header, sizeof(header));
@@ -608,6 +614,9 @@ bool Session::RestoreSnapshotImpl(std::span<const std::uint8_t> payload,
   draft_length_ = restored_policy;
   stats_ = {};
   valid_ = true;
+  // The restored keys keep the factor they were saved with; the next Feed or
+  // decode moves the session to the factor its positions need.
+  model_->executor_->AdoptYarnFactor(*session_, header.yarn_factor);
   return true;
 }
 
@@ -719,12 +728,19 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
                    double* capture_ms, std::span<const std::int32_t> after,
                    const PrefillCapture& consume) {
   rocm::Executor& exec = *model_->executor_;
+  const std::size_t ratio =
+      std::max<std::uint32_t>(1, model_->config().compress_ratio);
   for (std::size_t off = 0; off < tokens.size();) {
     const auto remaining = tokens.size() - off;
     const auto capacity = remaining <= exec.max_batch()
                               ? exec.max_batch()
                               : model_->PrefillCapacity();
     std::size_t n = std::min<std::size_t>(capacity, remaining);
+    // A following pass starts on a selection block (WmmaCausalAttention).
+    if (const auto end = tokens_.size() + n;
+        prefill && off + n < tokens.size() && end % ratio != 0 &&
+        n > end % ratio)
+      n -= end % ratio;
     const bool captures = (checkpoint || consume) && boundary > tokens_.size();
     // Extended-context attention can fall back from WMMA to the per-token
     // kernel. Its checkpoint must end a pass: the fused in-pass path requires
@@ -746,6 +762,11 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
     if (live)
       n = boundary - tokens_.size();
     const auto chunk = tokens.subspan(off, n);
+    if (exec.DynamicYarn() &&
+        !exec.SetYarnFactor(*session_, exec.YarnLevelFor(tokens_.size() + n),
+                            error_msg)) {
+      return false;
+    }
     if (MtpEnabled() && !tokens_.empty() &&
         !DraftCatchUp(chunk[0], false, error_msg)) {
       return false;
@@ -814,7 +835,8 @@ bool Session::SyncThrough(std::span<const std::int32_t> prompt,
   if (continuation_hooks_)
     continuation_hooks_->BeforeExecution();
   if (!checkpoint || boundary == 0 || boundary > prompt.size() ||
-      prompt.size() - boundary > 8 || boundary <= tokens_.size()) {
+      prompt.size() - boundary > model_->PrefillCheckpointTail() ||
+      boundary <= tokens_.size()) {
     AssignError(error_msg,
                 "checkpoint must extend the frontier in the text tail");
     return false;
@@ -832,7 +854,8 @@ bool Session::SyncThroughComponents(std::span<const std::int32_t> prompt,
   if (continuation_hooks_)
     continuation_hooks_->BeforeExecution();
   if (!capture || boundary == 0 || boundary > prompt.size() ||
-      prompt.size() - boundary > 8 || boundary <= tokens_.size()) {
+      prompt.size() - boundary > model_->PrefillCheckpointTail() ||
+      boundary <= tokens_.size()) {
     AssignError(
         error_msg,
         "component checkpoint must extend the frontier in the text tail");
@@ -1016,6 +1039,11 @@ bool Session::PrepareDecode(const DecodeRequest& request,
   const std::size_t room = ContextSize() - tokens_.size();
   const std::size_t cap =
       std::min<std::size_t>({max_tokens, room, exec.max_speculative()});
+  if (exec.DynamicYarn() &&
+      !exec.SetYarnFactor(
+          *session_, exec.YarnLevelFor(tokens_.size() + cap + 1), error_msg)) {
+    return false;
+  }
   // Head eligibility is speculative::DraftSubsetAllowed. Sampled cohorts are
   // never jointly planned (DecodeBatchImpl), so a sampled request decides the
   // same way alone and in any batch. A greedy request decoding alone has no

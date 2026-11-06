@@ -497,6 +497,7 @@ int ds4_mmq_dense_impl(
         /*x_soa=*/nullptr,
         /*soa_blocks=*/0,
         /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     const bool inline_sanitize =
         type == GGML_TYPE_Q8_0 && !use_stream_k;
@@ -595,6 +596,7 @@ extern "C" int ds4_mmq_q8_0_dense_preq(
         /*x_soa=*/nullptr,
         /*soa_blocks=*/0,
         /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     const bool inline_sanitize = !use_stream_k;
     args.sanitize_output = inline_sanitize;
@@ -963,6 +965,7 @@ int ds4_mmq_moe_impl(
         /*x_soa=*/x_soa,
         /*soa_blocks=*/soa_blocks,
         /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
 
     mul_mat_q_case<type>(*ctx, args, stream);
@@ -1456,6 +1459,7 @@ int ds4_mmq_moe_pair_impl(
         /*x_soa=*/xa_soa,
         /*soa_blocks=*/soa_blocks,
         /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     args.ncols_grid_max = routed_ncols_grid;
     args.mmq_x_request = g_routed_tile_cols;
@@ -1561,6 +1565,7 @@ int ds4_mmq_moe_pair_impl(
             /*x_soa=*/fused_down->W_soa,
             /*soa_blocks=*/fused_down->soa_blocks,
             /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
         };
         down_args.ncols_grid_max = routed_ncols_grid;
         bool down_done = false;

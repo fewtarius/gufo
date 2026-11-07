@@ -1,6 +1,7 @@
 #include "src/cli/serve/continuation_cache.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <limits>
@@ -34,7 +35,13 @@ int MaxRemovalPriority(SnapshotPurpose purpose) {
     case SnapshotPurpose::kRetry:
       return 0;
     case SnapshotPurpose::kHistory:
-      return 1;
+      // Rank 2 entries are provably redundant: RemovalPriority only ranks
+      // an entry 2 when a larger same-identity snapshot covers it, so a
+      // history capture may reclaim them. Without this, one long
+      // conversation's retained continuation snapshots fill the byte
+      // budget and every later history capture is skipped (observed: 30/30
+      // skipped requests on Laguna, retained ~18 GB of 18.8 GB).
+      return 2;
     case SnapshotPurpose::kContinuation:
     case SnapshotPurpose::kBranchPoint:
       return 3;
@@ -848,12 +855,27 @@ bool ContinuationCache::ReserveSnapshot(
             continue;
           }
           const int rank = priority_for(candidate);
-          if (rank > max_priority)
+          // An entry that is a strict prefix of the incoming continuation
+          // is provably redundant: the incoming snapshot carries the same
+          // tokens with the same identity, so restoring from it and
+          // rewinding yields the entry's state exactly. Purpose caps
+          // (kRetry publishes rank everything above 0) must not protect
+          // such entries, or a growing conversation retains one
+          // whole-context snapshot per turn until the byte budget is a
+          // wall of superseded copies. Learned branch points keep their
+          // own anchor semantics and are excluded.
+          const bool redundant_prefix =
+              !incoming.empty() &&
+              entry.purpose != SnapshotPurpose::kBranchPoint &&
+              std::ranges::equal(entry.input_identity, input_identity) &&
+              entry.tokens.size() < incoming.size() &&
+              IsPrefix(entry.tokens, incoming);
+          if (!redundant_prefix && rank > max_priority)
             continue;
-          if (rank < priority ||
+          if (redundant_prefix || rank < priority ||
               (rank == priority && entry.snapshot_last_used < oldest)) {
             selected = candidate;
-            priority = rank;
+            priority = redundant_prefix ? -1 : rank;
             oldest = entry.snapshot_last_used;
           }
         }
@@ -932,6 +954,28 @@ bool ContinuationCache::ReserveSnapshot(
         impl_->reserved_snapshot_bytes += snapshot_bytes;
         admitted = true;
       } else {
+        // Composition debug: what occupies the byte budget, by purpose.
+        // GUFO_CACHE_DEBUG only; off by default because a skip under a
+        // full cache is routine.
+        if (std::getenv("GUFO_CACHE_DEBUG") != nullptr) {
+          std::array<std::size_t, 4> purpose_bytes{};
+          for (std::size_t i = impl_->state_count; i < impl_->entries.size();
+               ++i) {
+            const auto& entry = *impl_->entries[i];
+            if (entry.valid && entry.snapshot != nullptr) {
+              purpose_bytes[static_cast<std::size_t>(entry.purpose)] +=
+                  entry.snapshot_bytes;
+            }
+          }
+          Logger::Info(
+              "cache",
+              "schema=continuation-cache event=retained_composition "
+              "continuation_bytes=" +
+                  std::to_string(purpose_bytes[0]) +
+                  " history_bytes=" + std::to_string(purpose_bytes[1]) +
+                  " retry_bytes=" + std::to_string(purpose_bytes[2]) +
+                  " branch_bytes=" + std::to_string(purpose_bytes[3]));
+        }
         events.push_back(make_event(SnapshotEventAction::kSkipped,
                                     SnapshotEventReason::kByteCapacity,
                                     snapshot_bytes, token_count));

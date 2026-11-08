@@ -72,11 +72,18 @@
       "fixtures/"
     ]
   },
-  "docs": {
-    "title": "Qwen3.8 27B",
-    "inputs": "Q4/Q8 GGUF; text/images",
-    "guide": "docs/models/qwen3.8-27b/README.md"
-  },
+  "docs": [
+    {
+      "title": "Qwen3.8 27B",
+      "inputs": "Q4/Q8 GGUF; text/images",
+      "guide": "docs/models/qwen3.8-27b/README.md"
+    },
+    {
+      "title": "Qwen3.6 35B-A3B",
+      "inputs": "Q4 GGUF; text",
+      "guide": "docs/models/qwen3.6-35b-a3b/README.md"
+    }
+  ],
   "tests": [
     {
       "target": "qwen_tokenizer_test",

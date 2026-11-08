@@ -505,27 +505,19 @@
       "minLength": 1
     },
     "docs": {
-      "type": "object",
-      "properties": {
-        "title": {
-          "type": "string",
-          "minLength": 1
+      "oneOf": [
+        {
+          "type": "object",
+          "$ref": "#/$defs/model_docs_entry"
         },
-        "inputs": {
-          "type": "string",
-          "minLength": 1
-        },
-        "guide": {
-          "type": "string",
-          "minLength": 1
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/model_docs_entry"
+          }
         }
-      },
-      "required": [
-        "title",
-        "inputs",
-        "guide"
-      ],
-      "additionalProperties": false
+      ]
     },
     "tests": {
       "type": "array",
@@ -731,6 +723,29 @@
           }
         }
       ]
+    },
+    "model_docs_entry": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "string",
+          "minLength": 1
+        },
+        "guide": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "title",
+        "inputs",
+        "guide"
+      ],
+      "additionalProperties": false
     }
   }
 }

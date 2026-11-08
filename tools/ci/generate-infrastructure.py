@@ -27,6 +27,7 @@ GUIDE_LABELS = {
     "qwen-image-2.1": "Usage",
     "qwen3-asr": "Usage",
     "qwen3-tts": "Voice modes",
+    "qwen3.6-35b-a3b": "Usage and modes",
     "qwen3.8-27b": "Usage and modes",
     "qwen3.8-flash-next": "Usage and modes",
 }
@@ -186,8 +187,13 @@ def generate_check_docs(root: Path, manifests: List[Dict[str, Any]]) -> str:
     model_dirs = set()
     for manifest in manifests:
         docs = manifest.get("docs")
-        if docs and "guide" in docs:
-            guide_path = docs["guide"]
+        if not docs:
+            continue
+        entries = docs if isinstance(docs, list) else [docs]
+        for entry in entries:
+            if "guide" not in entry:
+                continue
+            guide_path = entry["guide"]
             # e.g. "docs/models/deepseek-v4-flash/README.md" -> "deepseek-v4-flash"
             parts = Path(guide_path).parts
             if len(parts) >= 3 and parts[0] == "docs" and parts[1] == "models":
@@ -227,11 +233,16 @@ def generate_models_readme(root: Path, manifests: List[Dict[str, Any]]) -> str:
     rows.append("| Model | Weights / supported inputs | Guide |")
     rows.append("| --- | --- | --- |")
 
-    # Order by model name or title
+    # Order by model name or title. One extension can present more than one
+    # model, so the docs block is either an entry or a list of entries.
     model_docs = []
     for manifest in manifests:
         docs = manifest.get("docs")
-        if docs:
+        if not docs:
+            continue
+        if isinstance(docs, list):
+            model_docs.extend(docs)
+        else:
             model_docs.append(docs)
 
     model_docs.sort(key=lambda d: d.get("title", ""))

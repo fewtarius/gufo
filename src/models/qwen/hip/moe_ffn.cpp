@@ -92,6 +92,42 @@ namespace {
   }
 }
 
+/// The down projection's grouped matrix route, which shares one gather and
+/// one tiled activation quantization across all of an expert's tokens. The
+/// formats below are the ones its kernel instantiates; anything else keeps
+/// the vector route.
+[[nodiscard]] bool DownMatrixSupported(core::GgmlType type) noexcept {
+  return type == core::GgmlType::kQ4_K || type == core::GgmlType::kQ5_K ||
+         type == core::GgmlType::kQ5_1 || type == core::GgmlType::kQ8_0;
+}
+
+/// Below this many tokens the grouped matrix route cannot fill the device and
+/// the vector route's per-expert grouping wins. It is a floor on work, not a
+/// correctness bound: both routes compute the same projection.
+constexpr std::size_t kMatrixRouteRows = 16;
+
+/// Dispatches the down projection's grouped matrix route by weight format.
+int LaunchDownMatrix(core::GgmlType type, const void* w, const float* x,
+                     const std::int32_t* ids, float* out, int m, int k,
+                     int tokens, int experts, int used, hipStream_t stream) {
+  switch (type) {
+    case core::GgmlType::kQ4_K:
+      return qfn_mmq_q4_K_moe_raw(w, x, ids, out, m, k, tokens, experts, used,
+                                  stream);
+    case core::GgmlType::kQ5_K:
+      return qfn_mmq_q5_K_moe_raw(w, x, ids, out, m, k, tokens, experts, used,
+                                  stream);
+    case core::GgmlType::kQ5_1:
+      return qfn_mmq_q5_1_moe_raw(w, x, ids, out, m, k, tokens, experts, used,
+                                  stream);
+    case core::GgmlType::kQ8_0:
+      return qfn_mmq_q8_0_moe_raw(w, x, ids, out, m, k, tokens, experts, used,
+                                  stream);
+    default:
+      return -1;
+  }
+}
+
 /// True when every stage of this layer has a batched route. The router's
 /// weights are F32 or BF16, so they go through the batched dense kernel; a
 /// format either of them does not handle leaves the run to the per-token
@@ -162,31 +198,54 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
       scratch.shared_act.data(), scratch.shared_out.data(), rows, hidden,
       shared_ff, stream);
 
-  // The routed experts, a tile at a time. The down projection takes the
-  // gate/up result as [rows * used] slot rows with one slot each: the layout
-  // gate/up wrote it in, and the layout the selected ids are stored in.
+  // The routed experts. Gate and up run as one gated projection per tile,
+  // which groups the tile's tokens by expert and reads each expert's weight
+  // row once for the tokens that selected it.
   const std::size_t tile_rows = GatedRouteRows(layer.ffn_gate_exps.type);
   for (std::size_t begin = 0; begin < rows; begin += tile_rows) {
     const std::size_t count = std::min(tile_rows, rows - begin);
-    auto* const tile_act = scratch.act.data() + begin * used * ff;
     if (qfn_mmq_moe_gated_vec(
             static_cast<int>(layer.ffn_gate_exps.type),
             layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
-            x + begin * hidden, scratch.ids.data() + begin * used, tile_act,
-            static_cast<int>(ff), static_cast<int>(hidden),
-            static_cast<int>(count), static_cast<int>(experts),
-            static_cast<int>(used), stream) != 0) {
+            x + begin * hidden, scratch.ids.data() + begin * used,
+            scratch.act.data() + begin * used * ff, static_cast<int>(ff),
+            static_cast<int>(hidden), static_cast<int>(count),
+            static_cast<int>(experts), static_cast<int>(used), stream) != 0) {
       throw std::runtime_error("qwen35moe batched expert gate/up failed");
     }
-    if (qfn_mmq_moe_vec(static_cast<int>(layer.ffn_down_exps.type),
-                        layer.ffn_down_exps.data, tile_act,
-                        scratch.ids.data() + begin * used,
-                        scratch.down_out.data() + begin * used * hidden,
-                        static_cast<int>(hidden), static_cast<int>(ff),
-                        static_cast<int>(count * used),
-                        static_cast<int>(experts), 1, stream, nullptr,
-                        nullptr) != 0) {
-      throw std::runtime_error("qwen35moe batched expert down failed");
+  }
+
+  // The down projection reads the gate/up result as [rows][used][ff]. The
+  // grouped matrix route takes the run in one pass when the format has one;
+  // otherwise the vector route walks it a tile at a time, one slot per row.
+  //
+  // The matrix route takes the slot form - one row per selected expert with a
+  // single expert each - because it derives each gathered row from the token
+  // index alone. A token's slots are distinct feed-forward vectors, so the
+  // source row of slot (t, j) is t * used + j, which is exactly the row index
+  // when the slots are flattened.
+  if (rows >= kMatrixRouteRows &&
+      DownMatrixSupported(layer.ffn_down_exps.type)) {
+    if (LaunchDownMatrix(layer.ffn_down_exps.type, layer.ffn_down_exps.data,
+                         scratch.act.data(), scratch.ids.data(),
+                         scratch.down_out.data(), static_cast<int>(hidden),
+                         static_cast<int>(ff), static_cast<int>(rows * used),
+                         static_cast<int>(experts), 1, stream) != 0) {
+      throw std::runtime_error("qwen35moe matrix expert down failed");
+    }
+  } else {
+    for (std::size_t begin = 0; begin < rows; begin += tile_rows) {
+      const std::size_t count = std::min(tile_rows, rows - begin);
+      if (qfn_mmq_moe_vec(
+              static_cast<int>(layer.ffn_down_exps.type),
+              layer.ffn_down_exps.data, scratch.act.data() + begin * used * ff,
+              scratch.ids.data() + begin * used,
+              scratch.down_out.data() + begin * used * hidden,
+              static_cast<int>(hidden), static_cast<int>(ff),
+              static_cast<int>(count * used), static_cast<int>(experts), 1,
+              stream, nullptr, nullptr) != 0) {
+        throw std::runtime_error("qwen35moe batched expert down failed");
+      }
     }
   }
 

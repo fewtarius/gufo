@@ -139,6 +139,33 @@ int LaunchMatrixMoe(core::GgmlType type, const void* w, const float* x,
   }
 }
 
+/// Column-tile width for the routed expert GEMMs: the smallest tile at or above
+/// twice the mean bucket, so most experts finish in one tile with little
+/// padding. Mirrors the Flash-Next executor's choice for the same kernel.
+[[nodiscard]] int RoutedTileCols(std::size_t rows, std::size_t used,
+                                 std::size_t experts) noexcept {
+  const std::size_t mean =
+      std::max<std::size_t>(1, rows * used / std::max<std::size_t>(experts, 1));
+  for (int cols = 16; cols < 80; cols += 16) {
+    if (static_cast<std::size_t>(cols) >= 2 * mean) {
+      return cols;
+    }
+  }
+  return 80;
+}
+
+/// Tell the routed matrix kernel how wide a bucket can be and how wide a
+/// column tile should be. Without this the column grid spans every selected
+/// slot and every excess tile still costs a dispatch and a full shared-memory
+/// reservation. The bound is the row count because no expert can receive more
+/// slots than there are tokens, which is the same bound the Flash-Next executor
+/// uses when it has no measured counts.
+void SetRoutedHints(std::size_t rows, std::size_t used,
+                    std::size_t experts) noexcept {
+  qfn_mmq_set_routed_max_expert_rows(static_cast<int>(rows));
+  qfn_mmq_set_routed_tile_cols(RoutedTileCols(rows, used, experts));
+}
+
 /// True when every stage of this layer has a batched route. The router's
 /// weights are F32 or BF16, so they go through the batched dense kernel; a
 /// format either of them does not handle leaves the run to the per-token
@@ -217,6 +244,7 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
   // weight's ids bound at the token count, which does not match the slot-space
   // expert bounds, and it is order-of-magnitude slower for it.
   const std::size_t tile_rows = GatedRouteRows(layer.ffn_gate_exps.type);
+  SetRoutedHints(rows, used, experts);
   const bool pair_matrix = rows >= kMatrixRouteRows &&
                            PairMatrixSupported(layer) &&
                            !scratch.up_out.empty();

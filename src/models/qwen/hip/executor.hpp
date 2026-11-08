@@ -250,6 +250,13 @@ struct QwenMoeScratch {
   // rows runs them as two GEMMs instead of one fused call per row.
   std::span<float> shared_gate;
   std::span<float> shared_up;
+  // The routed gate/up pair's up projection. The grouped matrix route writes
+  // gate and up into separate buffers and applies SwiGLU afterwards.
+  std::span<float> up_out;
+  // The routed activation the down projection reads. The matrix route's SwiGLU
+  // writes here rather than over its own input, which the kernel marks
+  // __restrict__.
+  std::span<float> routed_act;
 };
 
 /// Typed non-owning capability views over stable Qwen GPU arena allocations.
@@ -373,7 +380,7 @@ public:
 
   /// The row count the mixture-of-experts scratch is sized for. One decode
   /// token uses one row; a batch of verification rows uses one each.
-  static constexpr std::uint32_t kMoeScratchRows = 64;
+  static constexpr std::uint32_t kMoeScratchRows = 256;
 
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;

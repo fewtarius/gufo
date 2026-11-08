@@ -106,10 +106,21 @@ namespace {
 /// correctness bound: both routes compute the same projection.
 constexpr std::size_t kMatrixRouteRows = 16;
 
-/// Dispatches the down projection's grouped matrix route by weight format.
-int LaunchDownMatrix(core::GgmlType type, const void* w, const float* x,
-                     const std::int32_t* ids, float* out, int m, int k,
-                     int tokens, int experts, int used, hipStream_t stream) {
+/// True when the gate and up projections both have a grouped matrix route and
+/// share a shape, which is what lets one activation buffer feed both. The
+/// formats are held to Q4_K because that is what this geometry is verified
+/// for; the dispatch itself would take the others.
+[[nodiscard]] bool PairMatrixSupported(
+    const models::QwenLayerWeights& layer) noexcept {
+  return layer.ffn_gate_exps.type == core::GgmlType::kQ4_K &&
+         layer.ffn_up_exps.type == core::GgmlType::kQ4_K &&
+         layer.ffn_gate_exps.num_elements == layer.ffn_up_exps.num_elements;
+}
+
+/// Dispatches the routed projections' grouped matrix route by weight format.
+int LaunchMatrixMoe(core::GgmlType type, const void* w, const float* x,
+                    const std::int32_t* ids, float* out, int m, int k,
+                    int tokens, int experts, int used, hipStream_t stream) {
   switch (type) {
     case core::GgmlType::kQ4_K:
       return qfn_mmq_q4_K_moe_raw(w, x, ids, out, m, k, tokens, experts, used,
@@ -198,20 +209,46 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
       scratch.shared_act.data(), scratch.shared_out.data(), rows, hidden,
       shared_ff, stream);
 
-  // The routed experts. Gate and up run as one gated projection per tile,
-  // which groups the tile's tokens by expert and reads each expert's weight
-  // row once for the tokens that selected it.
+  // The routed experts. From 16 tokens up the gate/up pair takes the grouped
+  // matrix route, which gathers every token's activation once and runs one
+  // matrix pass per expert over all of that expert's tokens. The vector route
+  // stays for narrow runs and for the formats the matrix route lacks. The pair
+  // runs as two passes, not the paired entry point: that one fixes the second
+  // weight's ids bound at the token count, which does not match the slot-space
+  // expert bounds, and it is order-of-magnitude slower for it.
   const std::size_t tile_rows = GatedRouteRows(layer.ffn_gate_exps.type);
-  for (std::size_t begin = 0; begin < rows; begin += tile_rows) {
-    const std::size_t count = std::min(tile_rows, rows - begin);
-    if (qfn_mmq_moe_gated_vec(
-            static_cast<int>(layer.ffn_gate_exps.type),
-            layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
-            x + begin * hidden, scratch.ids.data() + begin * used,
-            scratch.act.data() + begin * used * ff, static_cast<int>(ff),
-            static_cast<int>(hidden), static_cast<int>(count),
-            static_cast<int>(experts), static_cast<int>(used), stream) != 0) {
-      throw std::runtime_error("qwen35moe batched expert gate/up failed");
+  const bool pair_matrix = rows >= kMatrixRouteRows &&
+                           PairMatrixSupported(layer) &&
+                           !scratch.up_out.empty();
+  if (pair_matrix) {
+    if (LaunchMatrixMoe(layer.ffn_gate_exps.type, layer.ffn_gate_exps.data, x,
+                        scratch.ids.data(), scratch.act.data(),
+                        static_cast<int>(ff), static_cast<int>(hidden),
+                        static_cast<int>(rows), static_cast<int>(experts),
+                        static_cast<int>(used), stream) != 0 ||
+        LaunchMatrixMoe(layer.ffn_up_exps.type, layer.ffn_up_exps.data, x,
+                        scratch.ids.data(), scratch.up_out.data(),
+                        static_cast<int>(ff), static_cast<int>(hidden),
+                        static_cast<int>(rows), static_cast<int>(experts),
+                        static_cast<int>(used), stream) != 0) {
+      throw std::runtime_error("qwen35moe matrix expert gate/up failed");
+    }
+    LaunchBatchedSwiGLUActivation(scratch.act.data(), scratch.up_out.data(),
+                                  scratch.routed_act.data(), nullptr,
+                                  rows * used * ff, stream);
+  } else {
+    for (std::size_t begin = 0; begin < rows; begin += tile_rows) {
+      const std::size_t count = std::min(tile_rows, rows - begin);
+      if (qfn_mmq_moe_gated_vec(
+              static_cast<int>(layer.ffn_gate_exps.type),
+              layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+              x + begin * hidden, scratch.ids.data() + begin * used,
+              scratch.routed_act.data() + begin * used * ff,
+              static_cast<int>(ff), static_cast<int>(hidden),
+              static_cast<int>(count), static_cast<int>(experts),
+              static_cast<int>(used), stream) != 0) {
+        throw std::runtime_error("qwen35moe batched expert gate/up failed");
+      }
     }
   }
 
@@ -226,24 +263,25 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
   // when the slots are flattened.
   if (rows >= kMatrixRouteRows &&
       DownMatrixSupported(layer.ffn_down_exps.type)) {
-    if (LaunchDownMatrix(layer.ffn_down_exps.type, layer.ffn_down_exps.data,
-                         scratch.act.data(), scratch.ids.data(),
-                         scratch.down_out.data(), static_cast<int>(hidden),
-                         static_cast<int>(ff), static_cast<int>(rows * used),
-                         static_cast<int>(experts), 1, stream) != 0) {
+    if (LaunchMatrixMoe(layer.ffn_down_exps.type, layer.ffn_down_exps.data,
+                        scratch.routed_act.data(), scratch.ids.data(),
+                        scratch.down_out.data(), static_cast<int>(hidden),
+                        static_cast<int>(ff), static_cast<int>(rows * used),
+                        static_cast<int>(experts), 1, stream) != 0) {
       throw std::runtime_error("qwen35moe matrix expert down failed");
     }
   } else {
     for (std::size_t begin = 0; begin < rows; begin += tile_rows) {
       const std::size_t count = std::min(tile_rows, rows - begin);
-      if (qfn_mmq_moe_vec(
-              static_cast<int>(layer.ffn_down_exps.type),
-              layer.ffn_down_exps.data, scratch.act.data() + begin * used * ff,
-              scratch.ids.data() + begin * used,
-              scratch.down_out.data() + begin * used * hidden,
-              static_cast<int>(hidden), static_cast<int>(ff),
-              static_cast<int>(count * used), static_cast<int>(experts), 1,
-              stream, nullptr, nullptr) != 0) {
+      if (qfn_mmq_moe_vec(static_cast<int>(layer.ffn_down_exps.type),
+                          layer.ffn_down_exps.data,
+                          scratch.routed_act.data() + begin * used * ff,
+                          scratch.ids.data() + begin * used,
+                          scratch.down_out.data() + begin * used * hidden,
+                          static_cast<int>(hidden), static_cast<int>(ff),
+                          static_cast<int>(count * used),
+                          static_cast<int>(experts), 1, stream, nullptr,
+                          nullptr) != 0) {
         throw std::runtime_error("qwen35moe batched expert down failed");
       }
     }

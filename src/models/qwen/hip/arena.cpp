@@ -45,6 +45,27 @@ std::size_t CheckedMultiply(std::size_t left, std::size_t right) {
   return left * right;
 }
 
+/// Floats per row of the mixture-of-experts feed-forward scratch.
+///
+/// The allocation and the view over it must agree exactly: a view that is one
+/// row wider than the buffer hands out spans past its end, and the tail pages
+/// are not mapped. Both sites call this rather than recomputing the sum.
+[[nodiscard]] std::size_t MoeScratchRowFloats(const core::ModelConfig& config) {
+  const std::size_t used = config.num_experts_used;
+  const std::size_t expert_ff = config.expert_ff;
+  // The shared expert's SwiGLU needs three intermediate-width rows: the fused
+  // path's result and, for the batched path, the gate and up projections
+  // before the activation is applied.
+  const std::size_t shared_rows = 3 * config.shared_expert_ff;
+  // The routed pair's up projection and the activation its SwiGLU writes, one
+  // expert slot's feed-forward width per row.
+  const std::size_t routed_rows = 2 * CheckedMultiply(used, expert_ff);
+  return config.num_experts + 1 + used + used + 1 +
+         CheckedMultiply(used, expert_ff) +
+         CheckedMultiply(used, config.hidden_size) + shared_rows +
+         config.hidden_size + routed_rows;
+}
+
 std::size_t CheckedSum(std::size_t left, std::size_t right) {
   if (right > std::numeric_limits<std::size_t>::max() - left) {
     throw std::overflow_error("Qwen GPU allocation total overflows");
@@ -457,17 +478,8 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
   // The mixture-of-experts feed-forward scratch: one row per decode token
   // or verification row.
   if (config.IsMoe()) {
-    const std::size_t used = config.num_experts_used;
-    // The shared expert's SwiGLU needs three intermediate-width rows: the
-    // fused path's result and, for the batched path, the gate and up
-    // projections before the activation is applied.
-    const std::size_t shared_rows = 3 * config.shared_expert_ff;
-    const std::size_t row_floats = config.num_experts + 1 + used + used + 1 +
-                                   CheckedMultiply(used, config.expert_ff) +
-                                   CheckedMultiply(used, config.hidden_size) +
-                                   shared_rows + config.hidden_size;
-    AddAllocation(CheckedMultiply(kMoeScratchRows, row_floats), sizeof(float),
-                  &scratch);
+    AddAllocation(CheckedMultiply(kMoeScratchRows, MoeScratchRowFloats(config)),
+                  sizeof(float), &scratch);
   }
 
   auto& state = usage.request_state_bytes;
@@ -846,14 +858,7 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
     // The mixture-of-experts feed-forward scratch: one row per decode
     // token or verification row.
     if (config_.IsMoe()) {
-      const std::size_t experts = config_.num_experts;
-      const std::size_t used = config_.num_experts_used;
-      const std::size_t expert_ff = config_.expert_ff;
-      const std::size_t shared_ff = config_.shared_expert_ff;
-      const std::size_t rows = kMoeScratchRows;
-      const std::size_t floats =
-          rows * (experts + 1 + used + used + 1 + (used * expert_ff) +
-                  (used * hidden_size) + shared_ff + hidden_size);
+      const std::size_t floats = kMoeScratchRows * MoeScratchRowFloats(config_);
       HIP_CHECK(hipMalloc(&d_moe_buf, floats * sizeof(float)));
     }
 
@@ -1026,6 +1031,8 @@ QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
   auto* shared_gate = take(rows * shared_ff);
   auto* shared_up = take(rows * shared_ff);
   auto* shared_out = take(rows * hidden);
+  auto* up_out = take(rows * used * expert_ff);
+  auto* routed_act = take(rows * used * expert_ff);
   return {
       .router_logits = {router_logits, rows * experts},
       .shared_logit = {shared_logit, rows},
@@ -1038,6 +1045,8 @@ QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
       .shared_out = {shared_out, rows * hidden},
       .shared_gate = {shared_gate, rows * shared_ff},
       .shared_up = {shared_up, rows * shared_ff},
+      .up_out = {up_out, rows * used * expert_ff},
+      .routed_act = {routed_act, rows * used * expert_ff},
   };
 }
 

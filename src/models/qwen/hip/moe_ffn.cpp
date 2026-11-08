@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 
 #include "src/core/hip/hip_utils.hpp"
@@ -219,22 +220,56 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
       static_cast<std::uint32_t>(rows), stream);
 
   // The shared expert runs on every token, so the whole run is one pair of
-  // projections, one activation and one down projection. The quant-block
-  // route keeps the decode GEMV's accumulation order per row, so a token's
-  // shared-expert output does not depend on what shared the launch with it.
-  LaunchBatchedQuantGEMMFp32(
-      layer.ffn_gate_shexp.type, layer.ffn_gate_shexp.data, x,
-      scratch.shared_gate.data(), rows, shared_ff, hidden, stream);
-  LaunchBatchedQuantGEMMFp32(layer.ffn_up_shexp.type, layer.ffn_up_shexp.data,
-                             x, scratch.shared_up.data(), rows, shared_ff,
-                             hidden, stream);
-  LaunchBatchedSwiGLUActivation(
-      scratch.shared_gate.data(), scratch.shared_up.data(),
-      scratch.shared_act.data(), nullptr, rows * shared_ff, stream);
-  LaunchBatchedQuantGEMMFp32(
-      layer.ffn_down_shexp.type, layer.ffn_down_shexp.data,
-      scratch.shared_act.data(), scratch.shared_out.data(), rows, hidden,
-      shared_ff, stream);
+  // projections, one activation and one down projection.
+  //
+  // Q8_0 puts all three on the matrix-core route: the activation is quantized
+  // once into the tiled Q8_1 layout, the gate and up projections run as one
+  // fused pass that shares the activation reads, the SwiGLU result is quantized
+  // in that pass's epilogue, and the down projection reads it directly. The
+  // quant-block route it replaces grouped sixteen rows per weight load, which
+  // is a twentieth of the tiles' reuse and was a quarter of the layer's time.
+  // Other formats keep that route: it preserves the decode GEMV's accumulation
+  // order per row, which the matrix-core path does not.
+  static const bool shared_wmma_enabled = [] {
+    const char* const v = std::getenv("GUFO_SHARED_WMMA");
+    return v == nullptr || *v != '0';
+  }();
+  const bool shared_wmma = shared_wmma_enabled &&
+                           layer.ffn_gate_shexp.type == core::GgmlType::kQ8_0 &&
+                           layer.ffn_up_shexp.type == core::GgmlType::kQ8_0 &&
+                           layer.ffn_down_shexp.type == core::GgmlType::kQ8_0 &&
+                           !scratch.shared_q8_in.empty() &&
+                           !scratch.shared_q8_act.empty();
+  if (shared_wmma) {
+    LaunchQuantizeActivationQ8_1FromFp32(x, scratch.shared_q8_in.data(), rows,
+                                         hidden, stream);
+    LaunchBatchedDualQuantGEMMPreQuantized(
+        layer.ffn_gate_shexp.type, layer.ffn_gate_shexp.data,
+        layer.ffn_up_shexp.data, scratch.shared_q8_in.data(),
+        scratch.shared_gate.data(), scratch.shared_up.data(), rows, shared_ff,
+        hidden, stream);
+    LaunchBatchedFusedSwiGLUQuantizeQ8_1(
+        scratch.shared_gate.data(), scratch.shared_up.data(),
+        scratch.shared_q8_act.data(), rows, shared_ff, stream);
+    LaunchBatchedQuantGEMMPreQuantized(
+        layer.ffn_down_shexp.type, layer.ffn_down_shexp.data,
+        scratch.shared_q8_act.data(), scratch.shared_out.data(), rows, hidden,
+        shared_ff, stream);
+  } else {
+    LaunchBatchedQuantGEMMFp32(
+        layer.ffn_gate_shexp.type, layer.ffn_gate_shexp.data, x,
+        scratch.shared_gate.data(), rows, shared_ff, hidden, stream);
+    LaunchBatchedQuantGEMMFp32(layer.ffn_up_shexp.type, layer.ffn_up_shexp.data,
+                               x, scratch.shared_up.data(), rows, shared_ff,
+                               hidden, stream);
+    LaunchBatchedSwiGLUActivation(
+        scratch.shared_gate.data(), scratch.shared_up.data(),
+        scratch.shared_act.data(), nullptr, rows * shared_ff, stream);
+    LaunchBatchedQuantGEMMFp32(
+        layer.ffn_down_shexp.type, layer.ffn_down_shexp.data,
+        scratch.shared_act.data(), scratch.shared_out.data(), rows, hidden,
+        shared_ff, stream);
+  }
 
   // The routed experts. From 16 tokens up the gate/up pair takes the grouped
   // matrix route, which gathers every token's activation once and runs one

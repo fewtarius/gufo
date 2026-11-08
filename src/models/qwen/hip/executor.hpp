@@ -257,6 +257,11 @@ struct QwenMoeScratch {
   // writes here rather than over its own input, which the kernel marks
   // __restrict__.
   std::span<float> routed_act;
+  // Tiled Q8_1 encodings for the shared expert's matrix-core route: the
+  // activation its gate and up projections read, and the SwiGLU result its down
+  // projection reads. Byte spans because the tiled layout is not float-shaped.
+  std::span<std::byte> shared_q8_in;
+  std::span<std::byte> shared_q8_act;
 };
 
 /// Typed non-owning capability views over stable Qwen GPU arena allocations.
@@ -377,6 +382,9 @@ public:
   // The mixture-of-experts feed-forward scratch, split into spans by
   // GetScratchView. Null for a dense model.
   void* d_moe_buf{nullptr};
+  // The shared expert's tiled Q8_1 activation blocks, which the float scratch
+  // cannot hold because the tiled layout is not float-shaped.
+  void* d_moe_q8_buf{nullptr};
 
   /// The row count the mixture-of-experts scratch is sized for. One decode
   /// token uses one row; a batch of verification rows uses one each.

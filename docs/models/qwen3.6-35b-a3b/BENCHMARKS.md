@@ -1,20 +1,81 @@
 # Qwen35B-A3B benchmarks
 
-AMD Radeon 780M (gfx1103), 24.6 GiB of system memory, 6 GiB of firmware VRAM
-and a 26 GiB GTT window. Qwen3.6-35B-A3B UD-Q4_K_XL, one session, greedy,
-thinking off.
+AMD Radeon 780M (gfx1103), 25.8 GiB of usable system memory, 6 GiB of firmware
+VRAM and a 20 GiB GTT window. Qwen3.6-35B-A3B UD-Q4_K_XL, one session, greedy.
 
-**Throughput is not published for this model yet.** Prefill under Gufo sits
-well below the llama.cpp Vulkan reference on the same weights and the same
-host, and Gufo's prefill rate barely moves as the prompt grows where the
-reference scales with it. Decode runs the other way, in Gufo's favour. That
-gap is open work, so publishing pp and tg tables now would document numbers
-we expect to move substantially. They will appear in one pass, from a single
-measurement run, once the prefill path is fixed.
+## Method
 
-What follows is the memory geometry, which is a property of the cache format
-rather than a performance claim, and which does not move when the prefill
-path changes.
+Prefill is measured through `/v1/completions` at `temperature: 0` with prompts
+generated so that no two of them share a prefix. This matters: both engines
+reuse a repeated prompt prefix, so a set of probes built by repeating one
+sentence measures only the new tail and reports a rate with no meaning. Every
+figure below was taken with the prompt cache a miss, confirmed from the
+server's own completed-request line.
+
+The llama.cpp columns are from a llama.cpp Vulkan build on the same host, same
+weights, same prompts, in the same session, with `--flash-attn on` and q8_0
+K/V. Both engines were measured sequentially because the model does not fit
+twice; that forces one of them to run hotter. llama.cpp's own rate fell from
+400 to 316 tok/s across three identical 4804-token prompts in one run, so a few
+percent either way is thermal, not a difference between engines.
+
+## Prefill
+
+Tokens per second, cumulative rate for the whole prompt, which is how
+llama.cpp's own log reports it.
+
+| Prompt tokens | llama.cpp Vulkan | Gufo | Gufo vs reference |
+| ---: | ---: | ---: | ---: |
+| 4,637 | ~401 | 383.3 | -4.5% |
+| 9,598 | ~380 | 363.2 | -4.5% |
+| 14,699 | 337.7 | 343.3 | +1.6% |
+| 18,664 | 319.4 | 329.3 | +3.1% |
+| 19,888 | 315.4 | 325.3 | +3.1% |
+| 93,011 | not measured | 197.7 | |
+
+The rate decays with prompt length on both engines because attention grows with
+context while the feed-forward does not. Gufo is a few percent behind at short
+prompts and a few percent ahead from roughly 14,000 tokens up.
+
+The 4,637 and 9,598 reference figures are interpolated from llama.cpp's
+neighbouring measurements; the rest are its own `prompt eval time` lines from
+the same run.
+
+## Decode
+
+26 to 27 tokens per second against the Vulkan reference's 16 to 17. Decode
+reads the weights per step rather than the context, so it does not move with
+the cache format.
+
+## Configuration these numbers were taken with
+
+```
+./gufo-run.sh --model Qwen3.6-35B-A3B
+QWEN_KV_CACHE_TYPE=q8_0
+--cache-ram-bytes off
+```
+
+`--cache-ram-bytes off` is required today rather than preferred. With the RAM
+cache enabled, four of five identical short requests fail with
+`logit distribution contains no finite values`; with it off the same sequence
+passes five of five. The cache also refuses its own captures
+(`reason=byte_capacity`) at this memory size, so it is not buying anything here
+regardless.
+
+The MoE prompt chunk is 1024 rows, which is a compile-time property of the
+arena rather than a flag, and it is why the loader clamps the native
+262,144-token context to 102,400: the prompt chunk and the context draw on the
+same budget.
+
+## What is verified
+
+- 8 of 8 exact-answer questions, warm server, this configuration.
+- A 93,011-token prompt prefills at 197.7 tok/s, so the clamped context is
+  usable rather than theoretical.
+- Three concurrent requests each return content.
+- A prompt beyond the context limit is refused with a clean error rather than a
+  device fault.
+- Server survives the whole battery.
 
 ## K/V cache footprint
 
@@ -44,12 +105,15 @@ unique nonce so the component cache cannot answer it from a checkpoint.
 
 ## Open work
 
-- **Prefill throughput.** Gufo's curve is flat against prompt length, which
-  points at per-chunk overhead rather than kernel throughput. Dispatch
-  telemetry reports a rejected compute graph (`rejectionMask=2`) on this
-  workload; the Vulkan reference reuses its graph on the same model.
-- **The comparison itself.** A llama.cpp Vulkan build runs on this host and
-  serves these weights at the native 262,144-token context, so the reference
-  columns that were previously marked unmeasurable are measurable.
-- **Multi-user rows.** One session is the whole memory budget at this
-  context.
+- **The RAM checkpoint cache.** Enabling it fails four of five identical short
+  requests with non-finite logits. The cache also refuses its own captures at
+  this memory size, so it is not currently usable here at all. Until the ledger
+  refuses a budget it cannot honour instead of failing mid-request, this model
+  runs with `--cache-ram-bytes off`.
+- **Context ceiling.** The prompt chunk is a compile-time arena property, and it
+  and the context draw on the same budget, so the clamp lands at 102,400 rather
+  than the native 262,144. Sizing the chunk from available memory instead would
+  let a larger host take a wider chunk and a longer context together.
+- **Multi-user rows.** One session is the whole memory budget at this context.
+- **Wider prompt chunks.** 1024 rows fills the routed expert tiles; 2048 would
+  fill them further, but it needs the context budget back first.

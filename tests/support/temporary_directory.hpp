@@ -5,7 +5,6 @@
 // supports it, removed when the test ends.
 
 #include <filesystem>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -21,12 +20,11 @@ public:
     const auto base = std::filesystem::temp_directory_path();
     // A random suffix keeps the name unpredictable in a shared temporary
     // root, as mkdtemp's was.
-    std::random_device random;
     for (int attempt = 0; attempt < 64; ++attempt) {
       std::error_code error;
       const auto candidate =
           base / (name + "-" + std::to_string(gufo::platform::ProcessId()) +
-                  "-" + std::to_string(random()));
+                  "-" + std::to_string(gufo::platform::RandomU64()));
       if (std::filesystem::create_directory(candidate, error)) {
         if (!gufo::platform::RestrictToOwner(candidate)) {
           std::filesystem::remove(candidate, error);

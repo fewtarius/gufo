@@ -223,4 +223,16 @@ bool FillRandomBytes(std::span<std::uint8_t> out) noexcept {
 #endif
 }
 
+std::uint64_t RandomU64() noexcept {
+  std::uint64_t value = 0;
+  if (!FillRandomBytes(std::span<std::uint8_t>(
+          reinterpret_cast<std::uint8_t*>(&value), sizeof(value)))) {
+    // The kernel refused. Fall back to the clock and the process id, which
+    // are not secret but are distinct per call.
+    value = static_cast<std::uint64_t>(std::time(nullptr)) << 32U;
+    value ^= static_cast<std::uint64_t>(ProcessId()) << 16U;
+  }
+  return value;
+}
+
 }  // namespace gufo::platform

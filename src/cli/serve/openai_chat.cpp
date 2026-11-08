@@ -32,6 +32,7 @@
 #include "src/cli/serve/stop_sequences.hpp"
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
+#include "src/core/platform/os_info.hpp"
 #include "src/core/utf8.hpp"
 #include "src/families/qwen/text/chat_template.hpp"
 
@@ -239,7 +240,7 @@ long long Now() {
 std::string RandomId(std::string_view prefix) {
   static constexpr std::string_view kCharacters =
       "abcdefghijklmnopqrstuvwxyz0123456789";
-  static thread_local std::mt19937 generator(std::random_device{}());
+  static thread_local std::mt19937 generator(platform::RandomU64());
   std::uniform_int_distribution<std::size_t> distribution{
       0, kCharacters.size() - 1};
 

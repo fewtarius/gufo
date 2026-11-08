@@ -89,6 +89,21 @@ PageFaults ReadPageFaults() noexcept;
 /// Fills `out` with OS-provided cryptographically random bytes.
 bool FillRandomBytes(std::span<std::uint8_t> out) noexcept;
 
+/// A random 64-bit value, taken from the kernel entropy source.
+///
+/// Preferred over std::random_device for seeding. libstdc++ routes the
+/// default engine through the CPU's RDRAND instruction when CPUID
+/// advertises it, so the value a process gets depends on a firmware
+/// setting it cannot inspect, and a host that advertises RDRAND without
+/// implementing it faults the process rather than degrading. Reading the
+/// kernel source keeps one entropy path for the whole tree, and it is the
+/// same source FillRandomBytes already uses for the identifiers that must
+/// not be guessable.
+///
+/// When the kernel refuses, the clock and the process id stand in: not
+/// secret, but distinct per call.
+[[nodiscard]] std::uint64_t RandomU64() noexcept;
+
 }  // namespace gufo::platform
 
 #endif  // GUFO_CORE_PLATFORM_OS_INFO_HPP_

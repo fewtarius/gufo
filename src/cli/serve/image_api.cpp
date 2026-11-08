@@ -9,7 +9,6 @@
 #include <cstring>
 #include <ctime>
 #include <map>
-#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -17,6 +16,7 @@
 #include "src/cli/serve/logging.hpp"
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
+#include "src/core/platform/os_info.hpp"
 #include "src/ext/image.hpp"
 
 namespace gufo::server {
@@ -500,11 +500,8 @@ HttpResponse HandleImageApiRequest(const HttpRequest& request,
     }
     // Omitted steps keep zero so the runner applies its checkpoint default.
     generation.steps = static_cast<int>(Number(fields, "steps", 0, 2, 100));
-    std::random_device entropy;
-    generation.seed =
-        Number(fields, "seed",
-               (static_cast<std::uint64_t>(entropy()) << 21) ^ entropy(), 0,
-               (1ULL << 53) - 1);
+    std::uint64_t seed = platform::RandomU64();
+    generation.seed = Number(fields, "seed", seed, 0, (1ULL << 53) - 1);
     const auto count = Number(fields, "n", 1, 1, 10);
     ValidateRequest(generation);
     auto body = json::Value::object();

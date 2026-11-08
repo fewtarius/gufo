@@ -6,6 +6,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <exception>
 #include <fstream>
@@ -14,7 +15,6 @@
 #include <limits>
 #include <map>
 #include <mutex>
-#include <random>
 #include <ranges>
 #include <sstream>
 #include <stop_token>
@@ -126,11 +126,11 @@ void WipeString(std::string* value) noexcept {
 }
 
 std::string RandomVideoId() {
-  std::array<unsigned char, 12> bytes{};
-  std::random_device random;
-  for (unsigned char& byte : bytes) {
-    byte = static_cast<unsigned char>(random());
-  }
+  std::array<std::uint8_t, 12> bytes{};
+  std::uint64_t seed = platform::RandomU64();
+  std::uint64_t seed2 = platform::RandomU64();
+  std::memcpy(bytes.data(), &seed, sizeof(seed));
+  std::memcpy(bytes.data() + 8, &seed2, 4);
   static constexpr char kHex[] = "0123456789abcdef";
   std::string id = "video_";
   id.reserve(6 + bytes.size() * 2U);

@@ -45,6 +45,7 @@
 #include "src/cli/serve/websocket.hpp"
 #include "src/core/json.hpp"
 #include "src/core/platform/net.hpp"
+#include "src/core/platform/os_info.hpp"
 #include "src/core/platform/shutdown_signal.hpp"
 #include "src/core/utf8.hpp"
 #include "src/families/qwen/text/chat_template.hpp"
@@ -318,8 +319,7 @@ long long Now() {
 
 std::string RandomId() {
   static constexpr char kChars[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-  std::random_device rd;
-  std::mt19937 gen(rd());
+  std::mt19937 gen(platform::RandomU64());
   std::uniform_int_distribution<std::size_t> dist(0, 35);
   std::string out;
   out.reserve(12);

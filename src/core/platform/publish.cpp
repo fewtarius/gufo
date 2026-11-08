@@ -4,9 +4,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <random>
 #include <system_error>
 #include <utility>
+
+#include "src/core/platform/os_info.hpp"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -233,9 +234,9 @@ AtomicPublishedFile AtomicPublishedFile::Create(
   };
 #if defined(_WIN32)
   for (int attempt = 0; attempt < 32; ++attempt) {
-    std::random_device device;
     const auto suffix =
-        ".tmp." + std::to_string(static_cast<std::uint32_t>(device()));
+        ".tmp." +
+        std::to_string(static_cast<std::uint32_t>(platform::RandomU64()));
     const auto temporary = final_path.string() + suffix;
     HANDLE file = CreateFileA(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
                               CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);

@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <random>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
+#include "src/core/platform/os_info.hpp"
 #include "src/core/sampling_logit_row.hpp"
 
 namespace gufo::sampling {
@@ -133,9 +133,7 @@ void ApplyMinP(std::vector<Candidate>* candidates,
   if (seed >= 0) {
     return static_cast<std::uint64_t>(seed);
   }
-  std::random_device random_device;
-  return (static_cast<std::uint64_t>(random_device()) << 32U) ^
-         static_cast<std::uint64_t>(random_device());
+  return platform::RandomU64();
 }
 
 /// Leading candidates whose softmax mass first reaches `target`, at least

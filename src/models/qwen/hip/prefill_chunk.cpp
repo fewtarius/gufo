@@ -13,6 +13,108 @@
 #include "src/models/qwen/hip/moe_ffn.hpp"
 
 namespace gufo::hip {
+
+namespace {
+
+/// Env-gated phase timing for the layer loop.
+///
+/// Marks are GPU events on the arena stream, so the report is device time per
+/// phase rather than host launch time, and the loop needs no synchronisation to
+/// be measured. Three marks per layer (layer start, attention start, attention
+/// end) plus a trailer: the feed-forward time of a layer is the gap from the
+/// end of its attention to the start of the next layer's, and the chunk trailer
+/// closes the last one.
+///
+/// This exists because host timing over an async launch measures queueing, and
+/// guessing at which stage is hot is how effort goes into the wrong kernel.
+class PhaseClock {
+public:
+  PhaseClock() : on_(std::getenv("GUFO_PROFILE") != nullptr) {}
+
+  void SetStream(hipStream_t stream) { stream_ = stream; }
+
+  void Mark() {
+    if (!on_) {
+      return;
+    }
+    hipEvent_t event{};
+    if (hipEventCreate(&event) != hipSuccess ||
+        hipEventRecord(event, stream_) != hipSuccess) {
+      on_ = false;
+      return;
+    }
+    marks_.push_back(event);
+  }
+
+  /// Note whether the layer about to be measured runs full attention or the
+  /// state-space mixer. The two have different cost curves, and the report only
+  /// becomes actionable once they are separate.
+  void LayerKind(bool full_attention) {
+    if (on_) {
+      full_.push_back(full_attention);
+    }
+  }
+
+  void Report(std::uint32_t layers) {
+    if (!on_) {
+      return;
+    }
+    if (hipStreamSynchronize(stream_) != hipSuccess) {
+      return;
+    }
+    double norm = 0.0;
+    double attention = 0.0;
+    double attention_full = 0.0;
+    double attention_mixer = 0.0;
+    double feed_forward = 0.0;
+    for (std::uint32_t l = 0; l < layers; ++l) {
+      const std::size_t base = 1 + static_cast<std::size_t>(l) * 3;
+      if (base + 3 >= marks_.size()) {
+        break;
+      }
+      float n = 0.0F;
+      float a = 0.0F;
+      float f = 0.0F;
+      (void)hipEventElapsedTime(&n, marks_[base + 0], marks_[base + 1]);
+      (void)hipEventElapsedTime(&a, marks_[base + 1], marks_[base + 2]);
+      (void)hipEventElapsedTime(&f, marks_[base + 2], marks_[base + 3]);
+      norm += n;
+      attention += a;
+      if (l < full_.size() && full_[l]) {
+        attention_full += a;
+      } else {
+        attention_mixer += a;
+      }
+      feed_forward += f;
+    }
+    full_.clear();
+    for (hipEvent_t event : marks_) {
+      (void)hipEventDestroy(event);
+    }
+    marks_.clear();
+    const double total = norm + attention + feed_forward;
+    const auto share = [total](double part) {
+      return total > 0.0 ? 100.0 * part / total : 0.0;
+    };
+    std::fprintf(stderr,
+                 "[profile] chunk total=%.0f ms  norm=%.0f (%.1f%%)  "
+                 "attn=%.0f (%.1f%%) [full %.0f / mixer %.0f]  ffn=%.0f "
+                 "(%.1f%%)\n",
+                 total, norm, share(norm), attention, share(attention),
+                 attention_full, attention_mixer, feed_forward,
+                 share(feed_forward));
+    std::fflush(stderr);
+  }
+
+private:
+  bool on_ = false;
+  hipStream_t stream_ = nullptr;
+  std::vector<hipEvent_t> marks_;
+  std::vector<bool> full_;
+};
+
+}  // namespace
+
 namespace {
 bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
                            std::size_t batch) {
@@ -175,7 +277,12 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
 
   // 3. Layer stack. One recurrent pass per chunk.
   const auto recurrent_state = arena_.BeginRecurrentWrite();
+  PhaseClock clock;
+  clock.SetStream(arena_.stream);
+  clock.Mark();
   for (std::uint32_t l = 0; l < config.num_layers; ++l) {
+    clock.LayerKind(weights_.layers[l].is_full_attention);
+    clock.Mark();
     PrefillLayerCheckpoint(l);
     const auto& layer = weights_.layers[l];
     // Cache updates retain every row. The final layer's query/FFN outputs
@@ -247,6 +354,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                            hidden_size, eps, arena_.stream);
     }
 
+    clock.Mark();
     if (layer.is_full_attention) {
       // The quantized activation is read only by Q8_0 projections; when q/k/v
       // are all BF16 (as in the Q8_K_XL artifact) nothing consumes it, and when
@@ -500,6 +608,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       }
     }
 
+    clock.Mark();
     if (half_prefill) {
       LaunchBatchedRMSNormFp16(output_hidden, nullptr,
                                static_cast<const float*>(layer.ffn_norm.data),
@@ -672,6 +781,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
     }
     HIP_CHECK(hipStreamSynchronize(arena_.stream));
   }
+  clock.Mark();
+  clock.Report(config.num_layers);
   last_hidden_offset_ = (batch_size - 1) * hidden_size;
 
   if (!compute_logits) {

@@ -25,6 +25,24 @@ void MoeFfnToken(const models::QwenLayerWeights& layer,
                  std::uint32_t row, const float* x, float* out,
                  hipStream_t stream);
 
+/// The same feed-forward for a run of consecutive tokens.
+///
+/// `x` is `[rows][hidden_size]` and `out` is `[rows][hidden_size]`, both
+/// already normalized. The router, the shared expert and the combine each
+/// run once for the whole run; the routed projections run once per tile,
+/// where the tile width is the most a single gated projection can take for
+/// the layer's weight format. Inside a tile every weight row a token reads
+/// is read once for the whole tile, which is the reason this exists: walked
+/// one token at a time, the same expert weights are fetched again for every
+/// token that selects them.
+///
+/// Falls back to `MoeFfnToken` per row when the layer's formats have no
+/// batched route. `rows` must not exceed the scratch's row count.
+void MoeFfnBatch(const models::QwenLayerWeights& layer,
+                 const core::ModelConfig& config, const QwenMoeScratch& scratch,
+                 std::size_t rows, const float* x, float* out,
+                 hipStream_t stream);
+
 /// Runs every layer's expert kernels once outside a graph capture, so the
 /// matrix library's workspace pool is sized before the decode graph is
 /// captured.

@@ -531,14 +531,14 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
     const void* ffn_down_input = arena_.d_scratch_bf16;
 
     if (config.IsMoe()) {
-      // A routed feed-forward. The router runs per token, so the chunk is
-      // walked one token at a time; the attention above stayed batched.
+      // A routed feed-forward across the whole chunk. The router, the shared
+      // expert and the combine each run once for the chunk, and the routed
+      // projections run once per tile, so an expert's weight row is read once
+      // for every token in the tile that selected it instead of once per
+      // token.
       const auto moe_scratch = arena_.MoeScratchView();
-      for (std::size_t row = 0; row < batch_size; ++row) {
-        MoeFfnToken(layer, config, moe_scratch, static_cast<std::uint32_t>(row),
-                    arena_.d_normed + (row * hidden_size),
-                    arena_.d_ffn_out + (row * hidden_size), arena_.stream);
-      }
+      MoeFfnBatch(layer, config, moe_scratch, batch_size, arena_.d_normed,
+                  arena_.d_ffn_out, arena_.stream);
       LaunchBatchedResidualAdd(arena_.d_hidden, arena_.d_ffn_out,
                                arena_.d_hidden, batch_size, hidden_size,
                                arena_.stream);

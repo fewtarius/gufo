@@ -246,6 +246,10 @@ struct QwenMoeScratch {
   std::span<float> down_out;
   std::span<float> shared_act;
   std::span<float> shared_out;
+  // The shared expert's gate and up projections, kept apart so a batch of
+  // rows runs them as two GEMMs instead of one fused call per row.
+  std::span<float> shared_gate;
+  std::span<float> shared_up;
 };
 
 /// Typed non-owning capability views over stable Qwen GPU arena allocations.

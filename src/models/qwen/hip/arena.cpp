@@ -458,10 +458,14 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
   // or verification row.
   if (config.IsMoe()) {
     const std::size_t used = config.num_experts_used;
+    // The shared expert's SwiGLU needs three intermediate-width rows: the
+    // fused path's result and, for the batched path, the gate and up
+    // projections before the activation is applied.
+    const std::size_t shared_rows = 3 * config.shared_expert_ff;
     const std::size_t row_floats = config.num_experts + 1 + used + used + 1 +
                                    CheckedMultiply(used, config.expert_ff) +
                                    CheckedMultiply(used, config.hidden_size) +
-                                   config.shared_expert_ff + config.hidden_size;
+                                   shared_rows + config.hidden_size;
     AddAllocation(CheckedMultiply(kMoeScratchRows, row_floats), sizeof(float),
                   &scratch);
   }
@@ -1019,6 +1023,8 @@ QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
   auto* act = take(rows * used * expert_ff);
   auto* down_out = take(rows * used * hidden);
   auto* shared_act = take(rows * shared_ff);
+  auto* shared_gate = take(rows * shared_ff);
+  auto* shared_up = take(rows * shared_ff);
   auto* shared_out = take(rows * hidden);
   return {
       .router_logits = {router_logits, rows * experts},
@@ -1030,6 +1036,8 @@ QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
       .down_out = {down_out, rows * used * hidden},
       .shared_act = {shared_act, rows * shared_ff},
       .shared_out = {shared_out, rows * hidden},
+      .shared_gate = {shared_gate, rows * shared_ff},
+      .shared_up = {shared_up, rows * shared_ff},
   };
 }
 

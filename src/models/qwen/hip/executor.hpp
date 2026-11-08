@@ -386,9 +386,21 @@ public:
   // cannot hold because the tiled layout is not float-shaped.
   void* d_moe_q8_buf{nullptr};
 
-  /// The row count the mixture-of-experts scratch is sized for. One decode
-  /// token uses one row; a batch of verification rows uses one each.
-  static constexpr std::uint32_t kMoeScratchRows = 256;
+  /// The row count the mixture-of-experts scratch is sized for, and therefore
+  /// the widest prompt chunk a mixture-of-experts model can run.
+  ///
+  /// This is worth more than it looks. The routed matrix route groups an
+  /// expert's slots into fixed-width tiles, so a narrow chunk leaves most of
+  /// every tile empty: at 256 rows an expert that 8 of 256 tokens select fills
+  /// half of one tile, while at 1024 rows it fills whole tiles. Measured on the
+  /// Radeon 780M, 1024 rows is 15-19% faster prefill than 256 across 4.8k to
+  /// 19.4k token prompts.
+  ///
+  /// It is not free: the scratch comes out of the same budget as the context,
+  /// so the clamp lands at 102400 tokens rather than 122880. Prefer this width
+  /// while the context stays comfortable, and size it from the memory that is
+  /// actually available rather than pinning it here.
+  static constexpr std::uint32_t kMoeScratchRows = 1024;
 
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;

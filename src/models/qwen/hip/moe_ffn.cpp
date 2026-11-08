@@ -167,6 +167,31 @@ void SetRoutedHints(std::size_t rows, std::size_t used,
   qfn_mmq_set_routed_tile_cols(RoutedTileCols(rows, used, experts));
 }
 
+/// Dense router projection.
+///
+/// The warp-per-element kernel this replaces gave each output element its own
+/// warp and looped over K with no reuse across the batch, so an expert row was
+/// fetched once per token. At 1024 rows, 256 experts and K of 2048 that is over
+/// a gigabyte of weight traffic for a projection whose weights are two
+/// megabytes, and it measured at about one percent of peak.
+///
+/// F32 weights go through BLAS instead, which is the same FP32 product with a
+/// tiled schedule and therefore the same arithmetic; only the summation order
+/// differs, which the router's top-k is insensitive to at this magnitude. BF16
+/// weights keep the old kernel because BLAS would have to round the activations
+/// to BF16 first, and the router's expert choice is not worth that risk.
+void DenseRouterGemm(const models::QwenTensorRef& weight, const float* x,
+                     float* out, std::size_t rows, std::size_t m, std::size_t k,
+                     hipStream_t stream, hipblasHandle_t blas) {
+  if (blas != nullptr && weight.type == core::GgmlType::kF32) {
+    LaunchHipblasGEMM(blas, weight.data, /*is_bf16=*/false, x, out, rows, m, k,
+                      /*d_x_bf16_buf=*/nullptr, stream);
+    return;
+  }
+  LaunchBatchedGEMM(weight.data, weight.type == core::GgmlType::kBF16, x, out,
+                    rows, m, k, stream);
+}
+
 /// True when every stage of this layer has a batched route. The router's
 /// weights are F32 or BF16, so they go through the batched dense kernel; a
 /// format either of them does not handle leaves the run to the per-token
@@ -187,7 +212,7 @@ void SetRoutedHints(std::size_t rows, std::size_t used,
 void MoeFfnBatch(const models::QwenLayerWeights& layer,
                  const core::ModelConfig& config, const QwenMoeScratch& scratch,
                  std::size_t rows, const float* x, float* out,
-                 hipStream_t stream) {
+                 hipStream_t stream, hipblasHandle_t blas) {
   if (rows == 0) {
     return;
   }
@@ -207,12 +232,10 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
   const std::size_t shared_ff = config.shared_expert_ff;
 
   // The router scores every token in the run, then picks on the device.
-  LaunchBatchedGEMM(
-      layer.ffn_gate_inp.data, layer.ffn_gate_inp.type == core::GgmlType::kBF16,
-      x, scratch.router_logits.data(), rows, experts, hidden, stream);
-  LaunchBatchedGEMM(layer.ffn_gate_inp_shexp.data,
-                    layer.ffn_gate_inp_shexp.type == core::GgmlType::kBF16, x,
-                    scratch.shared_logit.data(), rows, 1, hidden, stream);
+  DenseRouterGemm(layer.ffn_gate_inp, x, scratch.router_logits.data(), rows,
+                  experts, hidden, stream, blas);
+  DenseRouterGemm(layer.ffn_gate_inp_shexp, x, scratch.shared_logit.data(),
+                  rows, 1, hidden, stream, blas);
   LaunchMoeRouterTopK(
       scratch.router_logits.data(), scratch.shared_logit.data(),
       scratch.ids.data(), scratch.weights.data(), scratch.shared_weight.data(),

@@ -538,7 +538,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       // token.
       const auto moe_scratch = arena_.MoeScratchView();
       MoeFfnBatch(layer, config, moe_scratch, batch_size, arena_.d_normed,
-                  arena_.d_ffn_out, arena_.stream);
+                  arena_.d_ffn_out, arena_.stream, arena_.hipblas_handle);
       LaunchBatchedResidualAdd(arena_.d_hidden, arena_.d_ffn_out,
                                arena_.d_hidden, batch_size, hidden_size,
                                arena_.stream);

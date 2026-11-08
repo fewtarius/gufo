@@ -41,7 +41,7 @@ void MoeFfnToken(const models::QwenLayerWeights& layer,
 void MoeFfnBatch(const models::QwenLayerWeights& layer,
                  const core::ModelConfig& config, const QwenMoeScratch& scratch,
                  std::size_t rows, const float* x, float* out,
-                 hipStream_t stream);
+                 hipStream_t stream, hipblasHandle_t blas = nullptr);
 
 /// Runs every layer's expert kernels once outside a graph capture, so the
 /// matrix library's workspace pool is sized before the decode graph is

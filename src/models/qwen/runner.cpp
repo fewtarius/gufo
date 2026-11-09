@@ -803,10 +803,34 @@ public:
       // and scratch, so it is the figure the cache budget follows. Do not
       // subtract the state here: the second claim would count it twice and
       // collapse the budget to zero.
-      snapshot_capacity = std::min(snapshot_capacity, *capacity);
-      snapshot_ceiling = std::min(snapshot_ceiling, *capacity);
-      if (snapshot_ceiling == 0 && *capacity != 0) {
-        snapshot_ceiling = *capacity;
+      // Leave the request-time transients a reserve. The pool figure here is
+      // what is left after the weights and the sessions, and a cache that
+      // claims all of it starves the logits and sampling workspace a request
+      // allocates once it starts: the symptom is not an allocation failure but
+      // a logit distribution with no finite values in it, which reads as a
+      // numeric bug rather than as memory pressure.
+      //
+      // Measured on a 25.8 GiB host with a 21.3 GiB model: before this, the
+      // snapshot budget equalled the entire remaining pool (261 MiB of 261 MiB)
+      // and one request in five failed that way. A cache too small to hold a
+      // checkpoint refuses its pins cleanly (capture_refused
+      // reason=byte_capacity) and costs only a re-prefill, so the reserve is
+      // always the right trade.
+      constexpr std::size_t kRequestReserveBytes = std::size_t{192} << 20;
+      const std::size_t headroom = *capacity > kRequestReserveBytes
+                                       ? *capacity - kRequestReserveBytes
+                                       : 0;
+      // The cache's own ledger allowance is not free: the component cache sizes
+      // device resources from it, so a generous allowance starves a request the
+      // same way a generous pin budget does. Keep it to a third of the
+      // headroom, which on this host is the difference between a server that
+      // answers and one that answers four requests in five with a logit
+      // distribution that has no finite values in it.
+      const std::size_t usable = headroom / 3;
+      snapshot_capacity = std::min(snapshot_capacity, usable);
+      snapshot_ceiling = std::min(snapshot_ceiling, usable);
+      if (snapshot_ceiling == 0 && usable != 0) {
+        snapshot_ceiling = usable;
       }
     }
     // The device pool is the binding constraint on a unified-memory APU:

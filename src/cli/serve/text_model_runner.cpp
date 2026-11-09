@@ -250,10 +250,39 @@ struct TextRunnerPool::Impl {
       // allocate under the ceiling; what they pin is charged on top of this.
       // The state claim includes lazy image/rollback storage, not startup
       // usage.
+      auto effective = std::min(requested, ceiling);
+      auto ram_enabled = ram_cache_options.enabled;
+      if (ram_enabled) {
+        // A retained checkpoint is a fixed-size payload dominated by the
+        // recurrent state, not by token count: on this model one checkpoint of
+        // a three-token prompt is sixty-nine megabytes. A budget below that
+        // cannot hold a single checkpoint, so every pin is refused after it has
+        // already been counted, and an explicit tiny budget fails earlier than
+        // that, during load.
+        //
+        // Refuse the retention instead of failing with it. Below the floor the
+        // cache is left with the same generous limit a disabled cache gets and
+        // simply does not retain, which is the configuration that is known to
+        // work: sessions still reuse their own live state and the disk path is
+        // untouched.
+        constexpr std::size_t kMinimumRetainedCacheBytes = std::size_t{512}
+                                                           << 20;
+        if (effective < kMinimumRetainedCacheBytes) {
+          server::Logger::Warn(
+              "cache",
+              "schema=component-cache-v1 event=ram_cache_refused "
+              "reason=insufficient_device_headroom requested_bytes=" +
+                  std::to_string(requested) +
+                  " available_bytes=" + std::to_string(effective) +
+                  " floor_bytes=" + std::to_string(kMinimumRetainedCacheBytes) +
+                  " fallback=sessions_reuse_live_state");
+          ram_enabled = false;
+          effective = std::max(requested, ceiling);
+        }
+      }
       component_cache = std::make_unique<ComponentTextCache>(
-          validated.runner, state_count, std::min(requested, ceiling),
-          disk_cache_options, !ram_cache_options.capacity_bytes, ceiling,
-          ram_cache_options.enabled);
+          validated.runner, state_count, effective, disk_cache_options,
+          !ram_cache_options.capacity_bytes, ceiling, ram_enabled);
       if (disk_cache_options) {
         shared_prefix_min_tokens = disk_cache_options->shared_prefix_min_tokens;
         shared_prefix_max_boundaries =

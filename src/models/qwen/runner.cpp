@@ -676,20 +676,21 @@ public:
       if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
           heap_free != 0) {
         auto& policy = execution_policy_;
-        // Widest first. 3072 is the widest width verified end to end: a
-        // 9817-token prompt runs with no fault and greedy output is
-        // bit-identical to the 2048 width across both head-group sizes the pack
-        // can choose. 4096 is deliberately absent. It is probably sound now
-        // that the pack reads the model's own head stride, but it cannot be
-        // made to fit any model on a 20 GiB pool, so it has never been
-        // executed, and a width that has never run must not be reachable by a
-        // host that can afford it.
+        // Widest first. 16384 is the widest verified width. On Nimo (gfx1151,
+        // 112 GiB) greedy output is bit-identical across 3072, 4096, 8192 and
+        // 16384 on prompts that exercise both head-group sizes, a 123k-token
+        // prompt at a 131072 context prefills with no fault, and 32768 rows
+        // measures flat against 16384 (1417 against 1403 tok/s at 57k), so the
+        // cap stays at 16384. A 20 GiB pool still resolves to 3072 or below
+        // because the width is chosen against the heap, so the wider
+        // candidates are only reachable where they fit.
         //
         // Below 1024 the matrix-core attention prefix does not engage, so the
         // direct kernel computes attention. That path is verified at these
         // widths, and a narrower chunk only costs prefill throughput.
-        constexpr std::uint32_t kCandidates[] = {3072, 2048, 1536,
-                                                 1024, 768,  512};
+        constexpr std::uint32_t kCandidates[] = {16384, 8192, 4096, 3072,
+                                                 2048,  1536, 1024, 768,
+                                                 512};
         const auto needed_at = [&](std::uint32_t rows) {
           auto probe = policy;
           probe.prompt_chunk_rows = rows;

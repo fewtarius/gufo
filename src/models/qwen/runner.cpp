@@ -640,25 +640,45 @@ public:
         speculative_options_(speculative_options),
         dflash_policy_(dflash_policy),
         execution_policy_(SelectExecutionPolicy()) {
-    // Widen the mixture-of-experts prompt chunk on hosts with room to spare.
+    // Size the mixture-of-experts prompt chunk against the memory this request
+    // will actually leave over.
     //
-    // Only abundant hosts are considered, and deliberately so. The scratch
-    // draws on the same budget as the context, so widening it narrows the
-    // context: on a host where the weights already take most of memory,
-    // offering the scratch a share of the leftover picked a wider chunk and
-    // then failed the session's state claim at the clamped context. Below this
-    // threshold the built-in width stands, which is the width this host was
-    // tuned at, so nothing here can make a tight machine worse.
-    constexpr std::size_t kWidenFloorBytes = std::size_t{8} << 30;
+    // The scratch and the context come out of the same pool, so the width is a
+    // trade, not a free win: a wider chunk narrows the largest context that
+    // fits. Resolving against a flat free-memory threshold gets that wrong in
+    // both directions. It refused to widen on a host that had room at a short
+    // context, and on this host a threshold high enough to protect the
+    // long-context clamp could never be met at any context, so the width was
+    // pinned after all.
+    //
+    // Instead, ask the same memory estimate the clamp uses whether the
+    // requested context still fits at each width, widest first. The widest that
+    // fits wins, and the built-in width is the floor, so a request that cannot
+    // afford more keeps exactly what it had. With an automatic context the
+    // requested figure is the model's native maximum, which never fits, so the
+    // width stays at the built-in value and the clamp proceeds as before.
     if (execution_policy_.prompt_chunk_rows == 0 &&
         model_->GetConfig().IsMoe()) {
       std::size_t heap_free = 0;
       std::size_t heap_total = 0;
       if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
-          heap_free >= kWidenFloorBytes) {
-        execution_policy_.prompt_chunk_rows =
-            hip::QwenGpuArena::ResolveMoeScratchRows(
-                model_->GetConfig(), execution_policy_, heap_free / 4);
+          heap_free != 0) {
+        const std::uint64_t budget = hip::HeapBudget(heap_free);
+        auto& policy = execution_policy_;
+        for (const std::uint32_t candidate :
+             {std::uint32_t{4096}, std::uint32_t{2048}}) {
+          policy.prompt_chunk_rows = candidate;
+          const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
+              model_->GetConfig(), max_context_, policy);
+          const std::uint64_t needed =
+              usage.temporary_scratch_bytes + usage.request_state_bytes;
+          if (needed <= budget) {
+            break;
+          }
+          // Not affordable at the requested context: drop the candidate and
+          // fall through to the built-in width.
+          policy.prompt_chunk_rows = 0;
+        }
       }
     }
     if (execution_policy_.UsesQ8AttentionKv()) {

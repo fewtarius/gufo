@@ -140,12 +140,34 @@ so the rate follows `rows * experts_used / experts`, which is 64 rows per bucket
 at a 2048-row chunk and 128 at 4096. That is why asking for a shorter context,
 and so a wider chunk, is faster here.
 
+## Prompt throughput
+
+Context 16384, q8_0 KV cache, resolved chunk width 2048:
+
+| prompt tokens | tok/s |
+| ---: | ---: |
+| 1820 | 337.9 |
+| 4478 | 450.0 |
+| 9762 | 429.6 |
+| 9762 | 428.8 |
+| 9762 | 426.0 |
+
 ## Open work
 
-- **A 4096-row chunk does not fit this device.** It needs about 390 MiB more than
-  the heap budget leaves, because the weights are 21.3 GiB against a 20 GiB
-  device pool. The largest reclaimable block is the per-expert down-projection
-  output, which is materialised in full before the combine.
+- **The prompt chunk is capped at 2048 rows until a fault above it is fixed.**
+  The matrix-core prefill attention fails with "Memory access fault ... Page not
+  present" on a long prompt when the chunk is wider than 2048. Without the cap, a
+  large-memory host would resolve 4096 rows and crash on exactly the long prompts
+  a wide chunk is for. The fault is localised to the branch that stages the
+  visible prefix into head-major FP16 (`GUFO_NO_PACKED_ATTN` removes it), and the
+  fault address lands well past the end of the KV cache rather than in the
+  staging workspace, so it is a bad source index rather than an overrun. Fixing
+  it is the gate on every routed-expert reuse gain, because a wider chunk is what
+  raises rows-per-expert-weight-read.
+- **A 4096-row chunk is 198 MiB short of the heap budget here**: 1630 MiB needed
+  against 1432. The largest reclaimable block is `down_out`, the per-expert
+  down-projection output, which is materialised in full before the combine and is
+  268 MiB of the per-row scratch at that width.
 - **The mixer's recurrence is a token-sequential scan** at 18.5 ms per layer, the
   largest single mixer stage. The chunked form of the delta rule would replace it
   with a few matrix products per chunk of tokens.
@@ -153,10 +175,8 @@ and so a wider chunk, is faster here.
   too little device memory for a 69 MB checkpoint, so the cache declines to
   retain and every prompt is a fresh prefill. On a host with the headroom it
   retains normally; the refusal is reported rather than silent.
-- **Context ceiling.** The prompt chunk is a compile-time arena property, and it
-  and the context draw on the same budget, so the clamp lands at 102,400 rather
-  than the native 262,144. Sizing the chunk from available memory instead would
-  let a larger host take a wider chunk and a longer context together.
+- **Context ceiling.** The prompt chunk and the context draw on the same budget,
+  so the clamp lands below the native 262,144 at this context. The chunk width is
+  resolved from available memory, so a host with the headroom takes a wider chunk
+  and a longer context together.
 - **Multi-user rows.** One session is the whole memory budget at this context.
-- **Wider prompt chunks.** 1024 rows fills the routed expert tiles; 2048 would
-  fill them further, but it needs the context budget back first.

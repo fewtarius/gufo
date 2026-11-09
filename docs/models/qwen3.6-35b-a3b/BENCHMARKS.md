@@ -157,6 +157,47 @@ the wider chunk is worth 5% and 7%. llama.cpp on this host and model reports
 385 t/s at 12288 tokens and 349 at 15516, so gufo is ahead of it across this
 range.
 
+## Long context
+
+A 131072-token context runs on this host. It is the ceiling, and the arithmetic
+says why: the weights are 21794 MiB of a 20480 MiB device pool, so the KV cache
+comes out of the 1907 MiB that is left, and at 128K it already takes 1360 of it
+(q8_0, 10 attention layers). Per-request state is 1487 MiB and the MoE scratch is
+264 MiB at the 512-row chunk the resolver narrows to.
+
+| context | outcome |
+| ---: | --- |
+| 131072 | runs |
+| 135168 | refused, reduce --context |
+| 143360 | loads at the narrowest chunk, then hangs the GPU |
+| 200000 | refused |
+
+At 131072 the chunk narrows to 512 rows on its own. The scratch and the context
+draw on the same pool, so the width is what gives way: at 1024 rows the claim is
+7 MiB short of what the pool can carry.
+
+Prefill of a 117987-token prompt, which is 90% of the context:
+
+| configuration | prefill | decode |
+| --- | ---: | ---: |
+| 512-row chunk | 189.4 tok/s | 7.2 tok/s |
+| 768-row chunk | 192.1 tok/s | 7.2 tok/s |
+| default cache | 186.8 tok/s | 7.2 tok/s |
+
+Against 449 tok/s prefill at 16K, the fall to 187 is the attention cost over an
+ever-larger cache, and decode falls from 27 to 7.2 for the same reason.
+
+128K is at the edge of this pool: about 156 MiB is free once the state is charged,
+so a request that needs more fails, and it fails as a logit distribution with no
+finite values rather than as an allocation error. Use `--cache-ram-bytes off` at
+this context. Higher contexts need a larger pool, not a code change.
+
+Two cache defects surfaced here and are fixed: a long context could fail the load
+outright with a bare `std::bad_alloc`, because the cache's budget was computed
+from a claim taken before the sessions charged their state; and the refusal path
+still handed the cache a device allowance, which starved the first request after
+the refusal.
+
 ## Open work
 
 - **The prompt chunk is capped at 3072 rows.** 4096 is absent from the resolver

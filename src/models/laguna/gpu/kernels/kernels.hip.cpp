@@ -831,7 +831,7 @@ constexpr std::uint32_t kSparseList = 512;
 // group-6 layers, 9 for group-9). The 16 WMMA output columns hold
 // kTokensPerWave tokens x kHeadsPerKv heads, so a group with a higher
 // ratio simply fits fewer tokens per wave (9 has to drop to one).
-template<int kHeadsPerKv, bool kQ8>
+template<int kHeadsPerKv, bool kQ8, bool kHeadMajor = false>
 __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
     const __half* __restrict__ q, const void* __restrict__ k_cache,
     const void* __restrict__ v_cache, const float* __restrict__ sinks,
@@ -858,9 +858,18 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
   // kTokensPerWave tokens x kHeadsPerKv heads. Group-6 fits 2 tokens per
   // wave; group-9 fits only 1 (9 * 2 = 18 > 16), so a block covers 8
   // tokens instead of 16.
-  constexpr std::uint32_t kTokensPerWave = kWmmaColumns / kHeadsPerKv;
+  //
+  // kHeadMajor trades that packing for one more: the 16 columns are 16
+  // tokens of a SINGLE query head, so the tile is always full whatever the
+  // group size, and every wave in the block shares one head - which means
+  // the K/V tile loaded into shared memory serves 128 tokens instead of 8.
+  // That is the K/V traffic divisor at depth, where the window read is what
+  // bounds the SWA layers.
+  constexpr std::uint32_t kTokensPerWave =
+      kHeadMajor ? kWmmaColumns : kWmmaColumns / kHeadsPerKv;
   constexpr std::uint32_t kBlockTokens = kWmmaWaves * kTokensPerWave;
-  const std::uint32_t kv_head = blockIdx.x;
+  const std::uint32_t kv_head =
+      kHeadMajor ? (blockIdx.x / kHeadsPerKv) : blockIdx.x;
   const std::uint32_t t0 = blockIdx.y * kBlockTokens;
   // Round-robin key tiles across grid.z blocks (split-K decode): each split
   // produces a partial (m, l, acc[d]) merged by AttentionMergeKernel.
@@ -885,10 +894,12 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
   // The per-kv_head Q/output stride is kHeadsPerKv, NOT the WMMA tile
   // width (kWmmaGroup=8); using the tile width silently read/wrote the
   // wrong global head slot for every kv_head>=1.
-  const std::uint32_t token = t0 + wave * kTokensPerWave + sub / kHeadsPerKv;
-  const std::uint32_t head = kv_head * kHeadsPerKv + sub % kHeadsPerKv;
+  const std::uint32_t token =
+      t0 + wave * kTokensPerWave + (kHeadMajor ? sub : sub / kHeadsPerKv);
+  const std::uint32_t head = kHeadMajor ? blockIdx.x
+                                        : (kv_head * kHeadsPerKv + sub % kHeadsPerKv);
   const bool live = token < n_tokens;
-  const bool head_live = sub < kHeadsPerKv * kTokensPerWave;
+  const bool head_live = kHeadMajor || sub < kHeadsPerKv * kTokensPerWave;
   const std::uint32_t qpos = start + token;
 
   v16h q_frag[8];
@@ -1420,6 +1431,18 @@ void UpdatePooledKeysLaguna(const void* k_cache, __half* pooled_keys,
       end_pos, kv_heads, head_dim, nblk);
 }
 
+// Head-major attention tiling: 16 query tokens of one head per wave instead of
+// kTokensPerWave tokens x kHeadsPerKv heads per wave. Off by default until it
+// is verified against the packed layout; set LAGUNA_ATTN_HEADMAJOR=1 to select
+// it, so one build measures both arms.
+static bool HeadMajorAttentionEnabled() {
+  static const bool value = [] {
+    const char* const v = std::getenv("LAGUNA_ATTN_HEADMAJOR");
+    return v != nullptr && *v != '0';
+  }();
+  return value;
+}
+
 bool AttentionWmma(const __half* q, const void* k_cache, const void* v_cache,
                    const float* gate, float* out,
                    const std::uint32_t* start_pos, std::uint32_t heads,
@@ -1444,20 +1467,26 @@ bool AttentionWmma(const __half* q, const void* k_cache, const void* v_cache,
   if (heads_per_kv < 1 || heads_per_kv > kWmmaColumns)
     return false;
   const std::uint32_t split_count = partials != nullptr ? splits : 1;
-  const auto launch = [&](auto tag, bool q8) {
+  // Head-major only pays for a wide prefill: with one live column per block at
+  // n=1 it would do `heads` times the work of the packed layout, and decode is
+  // where that would show. Narrow batches keep the packed packing.
+  const bool head_major = HeadMajorAttentionEnabled() && n_tokens >= 256;
+  const auto launch = [&](auto tag, auto major, bool q8) {
     constexpr int kHeadsPerKv = decltype(tag)::value;
-    constexpr int kTokensPerWave = kWmmaColumns / kHeadsPerKv;
+    constexpr bool kMajor = decltype(major)::value;
+    constexpr int kTokensPerWave =
+        kMajor ? kWmmaColumns : kWmmaColumns / kHeadsPerKv;
     constexpr int kBlockTokens = kWmmaWaves * kTokensPerWave;
-    const dim3 grid(kv_heads, (n_tokens + kBlockTokens - 1) / kBlockTokens,
-                    split_count);
+    const dim3 grid(kMajor ? heads : kv_heads,
+                    (n_tokens + kBlockTokens - 1) / kBlockTokens, split_count);
     if (q8) {
-      AttentionWmmaKernelLaguna<kHeadsPerKv, true>
+      AttentionWmmaKernelLaguna<kHeadsPerKv, true, kMajor>
           <<<grid, kWmmaThreads, 0, stream>>>(
               q, k_cache, v_cache, gate, out, n_tokens, start_pos, heads,
               kv_heads, window, ring, pooled_keys, nblk, top_blocks, partials,
               split_count);
     } else {
-      AttentionWmmaKernelLaguna<kHeadsPerKv, false>
+      AttentionWmmaKernelLaguna<kHeadsPerKv, false, kMajor>
           <<<grid, kWmmaThreads, 0, stream>>>(
               q, k_cache, v_cache, gate, out, n_tokens, start_pos, heads,
               kv_heads, window, ring, pooled_keys, nblk, top_blocks, partials,
@@ -1466,12 +1495,22 @@ bool AttentionWmma(const __half* q, const void* k_cache, const void* v_cache,
   };
   using std::integral_constant;
   const bool q8 = kv_type == KvCacheType::kQ8_0;
+  const auto packed = integral_constant<bool, false>{};
+  const auto major = integral_constant<bool, true>{};
   switch (heads_per_kv) {
     case 6:
-      launch(integral_constant<int, 6>{}, q8);
+      if (head_major) {
+        launch(integral_constant<int, 6>{}, major, q8);
+      } else {
+        launch(integral_constant<int, 6>{}, packed, q8);
+      }
       break;
     case 9:
-      launch(integral_constant<int, 9>{}, q8);
+      if (head_major) {
+        launch(integral_constant<int, 9>{}, major, q8);
+      } else {
+        launch(integral_constant<int, 9>{}, packed, q8);
+      }
       break;
     default:
       return false;

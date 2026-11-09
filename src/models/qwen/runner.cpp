@@ -659,14 +659,31 @@ public:
     // width stays at the built-in value and the clamp proceeds as before.
     if (execution_policy_.prompt_chunk_rows == 0 &&
         model_->GetConfig().IsMoe()) {
+      // A forced width short-circuits the resolution below. It exists so a
+      // width can be tried without rebuilding, which is how the memory cost of
+      // a candidate is measured rather than modelled.
+      if (const char* const forced = std::getenv("GUFO_PROMPT_CHUNK_ROWS")) {
+        const int parsed = std::atoi(forced);
+        if (parsed > 0) {
+          execution_policy_.prompt_chunk_rows =
+              static_cast<std::uint32_t>(parsed);
+        }
+      }
+    }
+    if (execution_policy_.prompt_chunk_rows == 0 &&
+        model_->GetConfig().IsMoe()) {
       std::size_t heap_free = 0;
       std::size_t heap_total = 0;
       if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
           heap_free != 0) {
         const std::uint64_t budget = hip::HeapBudget(heap_free);
         auto& policy = execution_policy_;
-        for (const std::uint32_t candidate :
-             {std::uint32_t{4096}, std::uint32_t{2048}}) {
+        // Nothing wider than 2048 until the matrix-core attention path above
+        // that width is fixed: it faults with "Page not present" at long
+        // prompts, which is exactly the case a wide chunk is good for. 2048 is
+        // the widest width the attention path has been verified at, across
+        // repeated runs, so it is the ceiling the resolution may pick.
+        for (const std::uint32_t candidate : {std::uint32_t{2048}}) {
           policy.prompt_chunk_rows = candidate;
           const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
               model_->GetConfig(), max_context_, policy);
@@ -680,6 +697,25 @@ public:
           policy.prompt_chunk_rows = 0;
         }
       }
+    }
+    if (model_->GetConfig().IsMoe()) {
+      // Log what the chosen width costs against what is available, so a width
+      // that does not fit names its shortfall instead of surfacing as a failure
+      // to allocate later.
+      const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
+          model_->GetConfig(), max_context_, execution_policy_);
+      std::size_t heap_free = 0, heap_total = 0;
+      (void)hipMemGetInfo(&heap_free, &heap_total);
+      server::Logger::Info(
+          "loader",
+          "event=chunk_width rows=" +
+              std::to_string(execution_policy_.prompt_chunk_rows) +
+              " context=" + std::to_string(max_context_) + " needs_mib=" +
+              std::to_string(
+                  (usage.temporary_scratch_bytes + usage.request_state_bytes) /
+                  (1024ULL * 1024ULL)) +
+              " budget_mib=" +
+              std::to_string(hip::HeapBudget(heap_free) / (1024ULL * 1024ULL)));
     }
     if (execution_policy_.UsesQ8AttentionKv()) {
       const auto& config = model_->GetConfig();

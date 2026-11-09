@@ -64,6 +64,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <type_traits>
 
 #include "src/families/qwen/hip_common/attention_policy.hpp"
@@ -663,6 +664,16 @@ __global__ void PackAttentionHeads(const void* keys, const void* values,
 /// One instantiation of the matrix-core prefill attention for a fixed head
 /// geometry. `kQHeads` and `kKvHeadsW` are the model's head counts; every
 /// address the kernel and this launcher compute is scaled by them.
+/// True when the matrix-core attention is switched off for diagnosis.
+///
+/// The generic tiled kernel computes the same attention, so disabling this is a
+/// valid A/B and is how a fault inside the matrix-core path is told apart from
+/// one in the shared code around it. Read once.
+[[nodiscard]] bool WmmaAttentionDisabled() {
+  static const bool disabled = std::getenv("GUFO_NO_WMMA_ATTN") != nullptr;
+  return disabled;
+}
+
 template<std::uint32_t kQHeads, std::uint32_t kKvHeadsW>
 bool LaunchWmmaAttentionForGeometry(
     const float* q, const float* k, const float* v, const float* gate,
@@ -726,6 +737,7 @@ bool LaunchWmmaAttentionForGeometry(
   const auto heads_per_group = static_cast<std::uint32_t>(std::min(
       {std::size_t{kKvHeadsW}, packed_k_workspace.size_bytes() / key_head_bytes,
        packed_v_workspace.size_bytes() / value_head_bytes}));
+
   // Copying the prefix pays off only for large chunks. Small prefill tails
   // and speculative commit replays retain the canonical cache directly.
   // Reuse the same workspace for bounded groups at depths where all four
@@ -800,7 +812,8 @@ bool LaunchQwenWmmaAttention(
   // The head geometry only selects an instantiation, so a model that the layout
   // admits is not turned away for having a different number of heads.
   if (!detail::IsTiledAttentionLayoutSupported(support_params) ||
-      first_query >= batch_size || first_query % kWmmaQueryRows != 0) {
+      first_query >= batch_size || first_query % kWmmaQueryRows != 0 ||
+      WmmaAttentionDisabled()) {
     return false;
   }
   const auto launch = [&](auto tag_q, auto tag_kv) {

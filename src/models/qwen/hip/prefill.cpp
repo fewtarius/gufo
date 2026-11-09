@@ -71,7 +71,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptBatch(
   const std::size_t chunk_limit =
       weights_.config.IsMoe()
           ? std::min<std::size_t>(arena_.GetMaxBatch(),
-                                  QwenGpuArena::kMoeScratchRows)
+                                  arena_.GetMoeScratchRows())
           : arena_.GetMaxBatch();
   for (std::size_t offset = 0; offset < prompt_tokens.size();
        offset += chunk_limit) {

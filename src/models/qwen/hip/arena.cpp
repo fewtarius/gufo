@@ -28,9 +28,22 @@ constexpr std::uint32_t kMaxPromptBatch = 4096;
 /// the expert scratch. The arena's activation scratch is sized from the same
 /// bound: sizing it for the dense cap would reserve rows no pass can reach.
 [[nodiscard]] std::uint32_t PromptBatchRows(const core::ModelConfig& config,
-                                            std::uint32_t context) noexcept {
-  return std::min(context, config.IsMoe() ? QwenGpuArena::kMoeScratchRows
-                                          : kMaxPromptBatch);
+                                            std::uint32_t context,
+                                            std::uint32_t moe_rows) noexcept {
+  return std::min(context, config.IsMoe() ? moe_rows : kMaxPromptBatch);
+}
+
+/// The expert scratch's row count for a policy. Zero in the policy means the
+/// built-in width, and nothing resolved yet means the same, so every existing
+/// caller keeps its behaviour.
+[[nodiscard]] std::uint32_t ScratchRows(
+    const core::ModelConfig& config,
+    const QwenExecutionPolicy& policy) noexcept {
+  if (!config.IsMoe()) {
+    return QwenGpuArena::kMoeScratchRows;
+  }
+  return policy.prompt_chunk_rows != 0 ? policy.prompt_chunk_rows
+                                       : QwenGpuArena::kMoeScratchRows;
 }
 constexpr std::size_t kMaxTargetLayerTaps = 5;
 constexpr std::array<std::uint8_t, 8> kCompactSnapshotMagic = {
@@ -71,11 +84,10 @@ std::size_t CheckedMultiply(std::size_t left, std::size_t right) {
 /// Kept beside MoeScratchRowFloats and called by the same two sites, for the
 /// same reason: a view that overruns its allocation faults on an unmapped tail
 /// page rather than reporting an error.
-[[nodiscard]] std::size_t MoeScratchQ8Bytes(const core::ModelConfig& config) {
-  return QuantizedActivationBytes(QwenGpuArena::kMoeScratchRows,
-                                  config.hidden_size) +
-         QuantizedActivationBytes(QwenGpuArena::kMoeScratchRows,
-                                  config.shared_expert_ff);
+[[nodiscard]] std::size_t MoeScratchQ8Bytes(const core::ModelConfig& config,
+                                            std::uint32_t rows) {
+  return QuantizedActivationBytes(rows, config.hidden_size) +
+         QuantizedActivationBytes(rows, config.shared_expert_ff);
 }
 
 std::size_t CheckedSum(std::size_t left, std::size_t right) {
@@ -414,11 +426,46 @@ std::size_t QwenGpuSnapshot::SerializeCompact(
   return destination.size();
 }
 
+std::uint32_t QwenGpuArena::ResolveMoeScratchRows(
+    const core::ModelConfig& config, const QwenExecutionPolicy& policy,
+    std::size_t available_bytes) noexcept {
+  if (!config.IsMoe()) {
+    return kMoeScratchRows;
+  }
+  // An explicit width wins: the operator asked for it.
+  if (policy.prompt_chunk_rows != 0) {
+    return policy.prompt_chunk_rows;
+  }
+  // Widen above the built-in width only when the budget is comfortable.
+  //
+  // The fallback is the built-in width rather than something narrower on
+  // purpose: this resolution never makes a machine slower than it already was,
+  // it only lets a host with room run a wider chunk. A tighter host keeps the
+  // width it has always had and the context clamp does the rest.
+  //
+  // Ladder in halves so the routed matrix route always sees a tile-aligned
+  // chunk rather than an arbitrary count that happens to fit.
+  const std::size_t per_row =
+      CheckedMultiply(MoeScratchRowFloats(config), sizeof(float)) +
+      QuantizedActivationBytes(1, config.hidden_size) +
+      QuantizedActivationBytes(1, config.shared_expert_ff);
+  if (per_row == 0) {
+    return kMoeScratchRows;
+  }
+  for (const std::uint32_t candidate : {4096U, 2048U}) {
+    if (CheckedMultiply(candidate, per_row) <= available_bytes) {
+      return candidate;
+    }
+  }
+  return kMoeScratchRows;
+}
+
 QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
     const core::ModelConfig& config, std::uint32_t max_context,
     QwenExecutionPolicy policy) {
   const std::size_t context = std::max(max_context, 1U);
-  const std::size_t batch = PromptBatchRows(config, max_context);
+  const std::uint32_t moe_rows = ScratchRows(config, policy);
+  const std::size_t batch = PromptBatchRows(config, max_context, moe_rows);
   const std::size_t hidden = config.hidden_size;
   const std::size_t intermediate = config.intermediate_size;
   const std::size_t attention = config.AttentionSize();
@@ -490,9 +537,9 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
   // The mixture-of-experts feed-forward scratch: one row per decode token
   // or verification row.
   if (config.IsMoe()) {
-    AddAllocation(CheckedMultiply(kMoeScratchRows, MoeScratchRowFloats(config)),
+    AddAllocation(CheckedMultiply(moe_rows, MoeScratchRowFloats(config)),
                   sizeof(float), &scratch);
-    AddAllocation(1, MoeScratchQ8Bytes(config), &scratch);
+    AddAllocation(1, MoeScratchQ8Bytes(config, moe_rows), &scratch);
   }
 
   auto& state = usage.request_state_bytes;
@@ -793,7 +840,9 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
                            QwenExecutionPolicy policy)
     : config_(config),
       max_context_(std::max(max_context, 1U)),
-      max_batch_(PromptBatchRows(config, max_context)),
+      moe_scratch_rows_(ScratchRows(config, policy)),
+      max_batch_(
+          PromptBatchRows(config, max_context, ScratchRows(config, policy))),
       policy_(policy) {
   try {
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -871,9 +920,11 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
     // The mixture-of-experts feed-forward scratch: one row per decode
     // token or verification row.
     if (config_.IsMoe()) {
-      const std::size_t floats = kMoeScratchRows * MoeScratchRowFloats(config_);
+      const std::size_t floats =
+          moe_scratch_rows_ * MoeScratchRowFloats(config_);
       HIP_CHECK(hipMalloc(&d_moe_buf, floats * sizeof(float)));
-      HIP_CHECK(hipMalloc(&d_moe_q8_buf, MoeScratchQ8Bytes(config_)));
+      HIP_CHECK(hipMalloc(&d_moe_q8_buf,
+                          MoeScratchQ8Bytes(config_, moe_scratch_rows_)));
     }
 
     // Weight BF16 scratch: largest per-layer matmul weight in bf16 elements,
@@ -1022,7 +1073,7 @@ QwenMoeScratch QwenGpuArena::MoeScratchView() noexcept {
   if (d_moe_buf == nullptr) {
     return {};
   }
-  const std::size_t rows = kMoeScratchRows;
+  const std::size_t rows = moe_scratch_rows_;
   const std::size_t experts = config_.num_experts;
   const std::size_t used = config_.num_experts_used;
   const std::size_t expert_ff = config_.expert_ff;
@@ -1107,6 +1158,7 @@ std::optional<std::size_t> QwenGpuArena::GetTargetLayerCaptureIndex(
 QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
     : config_(other.config_),
       max_context_(other.max_context_),
+      moe_scratch_rows_(other.moe_scratch_rows_),
       max_batch_(other.max_batch_),
       policy_(other.policy_),
       target_layer_ids_(std::move(other.target_layer_ids_)) {
@@ -1217,6 +1269,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     FreeAll();
     config_ = other.config_;
     max_context_ = other.max_context_;
+    moe_scratch_rows_ = other.moe_scratch_rows_;
     max_batch_ = other.max_batch_;
     policy_ = other.policy_;
     target_layer_ids_ = std::move(other.target_layer_ids_);

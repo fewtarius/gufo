@@ -89,6 +89,13 @@ struct QwenExecutionPolicy {
   QwenRecurrentStateStorage recurrent_state_storage{
       QwenRecurrentStateStorage::kFp32};
 
+  /// Rows in the mixture-of-experts prompt chunk, which is also the expert
+  /// scratch's row count. Zero means "use the built-in width"; the runner
+  /// resolves it from the device budget so a larger host takes a wider chunk
+  /// and a tighter one takes a narrower chunk, instead of every machine being
+  /// pinned to the same value.
+  std::uint32_t prompt_chunk_rows{0};
+
   [[nodiscard]] static constexpr QwenExecutionPolicy Production() noexcept {
     return {};
   }
@@ -110,7 +117,8 @@ struct QwenExecutionPolicy {
     return (static_cast<std::uint64_t>(fuse_qk_norm_rope_kv) << 0U) |
            (static_cast<std::uint64_t>(UsesFp16AttentionKv()) << 8U) |
            (static_cast<std::uint64_t>(UsesBf16RecurrentState()) << 9U) |
-           (static_cast<std::uint64_t>(UsesQ8AttentionKv()) << 10U);
+           (static_cast<std::uint64_t>(UsesQ8AttentionKv()) << 10U) |
+           (static_cast<std::uint64_t>(prompt_chunk_rows) << 16U);
   }
 };
 

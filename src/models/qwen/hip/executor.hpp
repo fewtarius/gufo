@@ -402,6 +402,22 @@ public:
   /// actually available rather than pinning it here.
   static constexpr std::uint32_t kMoeScratchRows = 1024;
 
+  /// The expert scratch's row count for this arena. Held per-instance so a host
+  /// with room can run a wider prompt chunk: the routed matrix route fills
+  /// fixed-width tiles, and a chunk narrower than a tile wastes half of it.
+  [[nodiscard]] std::uint32_t GetMoeScratchRows() const noexcept {
+    return moe_scratch_rows_;
+  }
+
+  /// The widest candidate chunk that fits `available_bytes` of expert scratch,
+  /// or the built-in width when the policy names one or nothing fits.
+  ///
+  /// Candidates step in halves because the scratch is linear in rows, so the
+  /// choice is a single division rather than a search.
+  [[nodiscard]] static std::uint32_t ResolveMoeScratchRows(
+      const core::ModelConfig& config, const QwenExecutionPolicy& policy,
+      std::size_t available_bytes) noexcept;
+
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;
   }
@@ -480,6 +496,7 @@ private:
 
   core::ModelConfig config_;
   std::uint32_t max_context_;
+  std::uint32_t moe_scratch_rows_;
   std::uint32_t max_batch_;
   QwenExecutionPolicy policy_;
   std::vector<std::uint32_t> target_layer_ids_;

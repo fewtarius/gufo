@@ -640,6 +640,27 @@ public:
         speculative_options_(speculative_options),
         dflash_policy_(dflash_policy),
         execution_policy_(SelectExecutionPolicy()) {
+    // Widen the mixture-of-experts prompt chunk on hosts with room to spare.
+    //
+    // Only abundant hosts are considered, and deliberately so. The scratch
+    // draws on the same budget as the context, so widening it narrows the
+    // context: on a host where the weights already take most of memory,
+    // offering the scratch a share of the leftover picked a wider chunk and
+    // then failed the session's state claim at the clamped context. Below this
+    // threshold the built-in width stands, which is the width this host was
+    // tuned at, so nothing here can make a tight machine worse.
+    constexpr std::size_t kWidenFloorBytes = std::size_t{8} << 30;
+    if (execution_policy_.prompt_chunk_rows == 0 &&
+        model_->GetConfig().IsMoe()) {
+      std::size_t heap_free = 0;
+      std::size_t heap_total = 0;
+      if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
+          heap_free >= kWidenFloorBytes) {
+        execution_policy_.prompt_chunk_rows =
+            hip::QwenGpuArena::ResolveMoeScratchRows(
+                model_->GetConfig(), execution_policy_, heap_free / 4);
+      }
+    }
     if (execution_policy_.UsesQ8AttentionKv()) {
       const auto& config = model_->GetConfig();
       const auto kv_width =

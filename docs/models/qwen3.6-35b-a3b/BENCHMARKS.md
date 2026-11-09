@@ -122,8 +122,33 @@ reports the plan on stderr.
 Requests go to `/v1/completions` with `temperature: 0`. Each prompt carries a
 unique nonce so the component cache cannot answer it from a checkpoint.
 
+## Where the time goes
+
+`GUFO_PROFILE=1`, `GUFO_PROFILE_SSM=1` and `GUFO_PROFILE_FFN=1` break a prompt
+chunk down by stage. On a 1889-token chunk at 397 tok/s the chunk is 4.75 s:
+
+| block | ms | share |
+| ---: | ---: | ---: |
+| feed-forward | 2993 | 63% |
+| the state-space mixer (30 layers) | 1401 | 29% |
+| remainder | ~360 | 7% |
+
+The routed experts dominate the feed-forward and are the clearest headroom: they
+run at 1.1 to 1.8 TFLOP/s where the shared expert, at the same 512-wide shape on
+the same data, reaches 4.2. A routed weight row is reused once per expert bucket,
+so the rate follows `rows * experts_used / experts`, which is 64 rows per bucket
+at a 2048-row chunk and 128 at 4096. That is why asking for a shorter context,
+and so a wider chunk, is faster here.
+
 ## Open work
 
+- **A 4096-row chunk does not fit this device.** It needs about 390 MiB more than
+  the heap budget leaves, because the weights are 21.3 GiB against a 20 GiB
+  device pool. The largest reclaimable block is the per-expert down-projection
+  output, which is materialised in full before the combine.
+- **The mixer's recurrence is a token-sequential scan** at 18.5 ms per layer, the
+  largest single mixer stage. The chunked form of the delta rule would replace it
+  with a few matrix products per chunk of tokens.
 - **Checkpoint retention does not fit here.** The context and the weights leave
   too little device memory for a 69 MB checkpoint, so the cache declines to
   retain and every prompt is a fresh prefill. On a host with the headroom it

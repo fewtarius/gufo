@@ -653,10 +653,9 @@ public:
     //
     // Instead, ask the same memory estimate the clamp uses whether the
     // requested context still fits at each width, widest first. The widest that
-    // fits wins, and the built-in width is the floor, so a request that cannot
-    // afford more keeps exactly what it had. With an automatic context the
-    // requested figure is the model's native maximum, which never fits, so the
-    // width stays at the built-in value and the clamp proceeds as before.
+    // fits wins, so a request that cannot afford more keeps exactly what it
+    // had. With an automatic context the requested figure is the model's native
+    // maximum, which never fits, so the clamp proceeds as before.
     if (execution_policy_.prompt_chunk_rows == 0 &&
         model_->GetConfig().IsMoe()) {
       // A forced width short-circuits the resolution below. It exists so a
@@ -676,7 +675,6 @@ public:
       std::size_t heap_total = 0;
       if (hipMemGetInfo(&heap_free, &heap_total) == hipSuccess &&
           heap_free != 0) {
-        const std::uint64_t budget = hip::HeapBudget(heap_free);
         auto& policy = execution_policy_;
         // Widest first. 3072 is the widest width verified end to end: a
         // 9817-token prompt runs with no fault and greedy output is
@@ -686,20 +684,60 @@ public:
         // made to fit any model on a 20 GiB pool, so it has never been
         // executed, and a width that has never run must not be reachable by a
         // host that can afford it.
-        for (const std::uint32_t candidate :
-             {std::uint32_t{3072}, std::uint32_t{2048}}) {
-          policy.prompt_chunk_rows = candidate;
+        //
+        // Below 1024 the matrix-core attention prefix does not engage, so the
+        // direct kernel computes attention. That path is verified at these
+        // widths, and a narrower chunk only costs prefill throughput.
+        constexpr std::uint32_t kCandidates[] = {3072, 2048, 1536,
+                                                 1024, 768,  512};
+        const auto needed_at = [&](std::uint32_t rows) {
+          auto probe = policy;
+          probe.prompt_chunk_rows = rows;
           const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
-              model_->GetConfig(), max_context_, policy);
-          const std::uint64_t needed =
-              usage.temporary_scratch_bytes + usage.request_state_bytes;
-          if (needed <= budget) {
+              model_->GetConfig(), max_context_, probe);
+          return usage.temporary_scratch_bytes + usage.request_state_bytes;
+        };
+        policy.prompt_chunk_rows = 0;
+        // Prefer the widest width that still leaves the dispatch reserve.
+        const std::uint64_t budget = hip::HeapBudget(heap_free);
+        for (const std::uint32_t candidate : kCandidates) {
+          if (needed_at(candidate) <= budget) {
+            policy.prompt_chunk_rows = candidate;
             break;
           }
-          // Not affordable at the requested context: drop the candidate and
-          // fall through to the built-in width.
-          policy.prompt_chunk_rows = 0;
         }
+        // A long context can exhaust the reserve at every width while the
+        // request-state claim, which is measured against the raw heap, would
+        // still admit a session. Narrowing the chunk costs prefill throughput;
+        // refusing the context costs the context. Take the widest width the
+        // claim admits, so a long-context request narrows its chunk instead of
+        // failing with "reduce --context".
+        //
+        // Measured at a 131072 context, this estimate comes in about 3.5% below
+        // what the arena then allocates: 1850 MiB estimated against 1914 MiB
+        // claimed at 1024 rows, so the reserve has to cover that bookkeeping
+        // and leave room for dispatch.
+        //
+        // A tenth of the heap is the reserve. At a 131072 context that keeps
+        // 156 MiB free at 512 rows, which is the configuration that prefilled
+        // 118k tokens cleanly. 768 rows also runs (192.1 against 189.4 tok/s,
+        // so the width is worth little at this depth) but leaves 75 MiB, and a
+        // 1.4% gain is not worth the dispatch headroom.
+        const std::uint64_t claim_limit = heap_free - (heap_free / 10);
+        if (policy.prompt_chunk_rows == 0) {
+          for (const std::uint32_t candidate : kCandidates) {
+            if (needed_at(candidate) <= claim_limit) {
+              policy.prompt_chunk_rows = candidate;
+              break;
+            }
+          }
+        }
+        // Nothing fits with headroom, so leave the width at zero and let the
+        // request-state claim refuse the context. Narrowing further was tried
+        // and is worse: at a 143360 context the narrowest width let the load
+        // proceed into a GPU hang (HSA_STATUS_ERROR_INVALID_PACKET_FORMAT)
+        // rather than refusing it, because the pool has no dispatch headroom
+        // left at that context. A clean refusal is the behaviour to keep.
       }
     }
     if (model_->GetConfig().IsMoe()) {

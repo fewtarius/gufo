@@ -52,20 +52,23 @@ the cache format.
 ```
 ./gufo-run.sh --model Qwen3.6-35B-A3B
 QWEN_KV_CACHE_TYPE=q8_0
---cache-ram-bytes off
 ```
 
-`--cache-ram-bytes off` is required today rather than preferred. With the RAM
-cache enabled, four of five identical short requests fail with
-`logit distribution contains no finite values`; with it off the same sequence
-passes five of five. The cache also refuses its own captures
-(`reason=byte_capacity`) at this memory size, so it is not buying anything here
-regardless.
+The RAM cache is enabled. It used to be a liability here: with it on, four of
+five identical short requests failed with `logit distribution contains no finite
+values`, because the cache's ledger allowance was the whole remaining device pool
+and the component cache sizes device resources from that allowance. The
+allowance now keeps a request-transient reserve and is capped at a third of the
+headroom, which fixed five of five. At this memory size the cache still declines
+to retain anything (it logs `ram_cache_refused`), because a single checkpoint is
+a 69 MB fixed payload dominated by the recurrent state and there is no room for
+one alongside the context. That is a capacity limit, not a defect.
 
-The MoE prompt chunk is 1024 rows, which is a compile-time property of the
-arena rather than a flag, and it is why the loader clamps the native
+The MoE prompt chunk is 1024 rows here and it is why the loader clamps the native
 262,144-token context to 102,400: the prompt chunk and the context draw on the
-same budget.
+same budget. The width is resolved from free device memory at load and only
+widens on a host with at least 8 GiB to spare, so this clamp is specific to a
+machine this tight.
 
 ## What is verified
 
@@ -105,11 +108,10 @@ unique nonce so the component cache cannot answer it from a checkpoint.
 
 ## Open work
 
-- **The RAM checkpoint cache.** Enabling it fails four of five identical short
-  requests with non-finite logits. The cache also refuses its own captures at
-  this memory size, so it is not currently usable here at all. Until the ledger
-  refuses a budget it cannot honour instead of failing mid-request, this model
-  runs with `--cache-ram-bytes off`.
+- **Checkpoint retention does not fit here.** The context and the weights leave
+  too little device memory for a 69 MB checkpoint, so the cache declines to
+  retain and every prompt is a fresh prefill. On a host with the headroom it
+  retains normally; the refusal is reported rather than silent.
 - **Context ceiling.** The prompt chunk is a compile-time arena property, and it
   and the context draw on the same budget, so the clamp lands at 102,400 rather
   than the native 262,144. Sizing the chunk from available memory instead would

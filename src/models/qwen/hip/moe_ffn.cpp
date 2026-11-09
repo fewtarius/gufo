@@ -11,6 +11,7 @@
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/families/qwen/kernels/ops/moe.hpp"
 #include "src/families/qwen/kernels/ops/swiglu.hpp"
+#include "src/models/qwen/hip/profile.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace gufo::hip {
@@ -231,6 +232,10 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
   const std::size_t hidden = config.hidden_size;
   const std::size_t shared_ff = config.shared_expert_ff;
 
+  auto& ffn_clock = FfnClock();
+  ffn_clock.SetStream(stream);
+  ffn_clock.Mark();
+
   // The router scores every token in the run, then picks on the device.
   DenseRouterGemm(layer.ffn_gate_inp, x, scratch.router_logits.data(), rows,
                   experts, hidden, stream, blas);
@@ -241,6 +246,7 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
       scratch.ids.data(), scratch.weights.data(), scratch.shared_weight.data(),
       static_cast<std::uint32_t>(experts), static_cast<std::uint32_t>(used),
       static_cast<std::uint32_t>(rows), stream);
+  ffn_clock.Mark();
 
   // The shared expert runs on every token, so the whole run is one pair of
   // projections, one activation and one down projection.
@@ -294,6 +300,7 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
         shared_ff, stream);
   }
 
+  ffn_clock.Mark();
   // The routed experts. From 16 tokens up the gate/up pair takes the grouped
   // matrix route, which gathers every token's activation once and runs one
   // matrix pass per expert over all of that expert's tokens. The vector route
@@ -337,6 +344,7 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
       }
     }
   }
+  ffn_clock.Mark();
 
   // The down projection reads the gate/up result as [rows][used][ff]. The
   // grouped matrix route takes the run in one pass when the format has one;
@@ -373,11 +381,34 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
     }
   }
 
+  ffn_clock.Mark();
   LaunchMoeCombine(scratch.down_out.data(), scratch.weights.data(),
                    scratch.shared_out.data(), scratch.shared_weight.data(), out,
                    static_cast<std::uint32_t>(used),
                    static_cast<std::uint32_t>(hidden),
                    static_cast<std::uint32_t>(rows), stream);
+  ffn_clock.Mark();
+}
+
+SubStageClock& FfnClock() {
+  // Static so the marks span every layer of a chunk. Reporting per call would
+  // synchronise once per layer, which drains the queue and measures the stall
+  // rather than the work: the same stages read five times slower that way.
+  static SubStageClock clock("GUFO_PROFILE_FFN");
+  static const bool registered = [] {
+    clock.AddStage("router");
+    clock.AddStage("shared");
+    clock.AddStage("routed-gate-up");
+    clock.AddStage("routed-down");
+    clock.AddStage("combine");
+    return true;
+  }();
+  (void)registered;
+  return clock;
+}
+
+void FlushFfnProfile() {
+  FfnClock().Report("ffn");
 }
 
 void WarmMoeDecode(const models::QwenModelWeights& weights,

@@ -11,6 +11,7 @@
 #include "src/families/qwen/kernels/ops/prefill_fp16.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/moe_ffn.hpp"
+#include "src/models/qwen/hip/profile.hpp"
 
 namespace gufo::hip {
 
@@ -280,6 +281,15 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   PhaseClock clock;
   clock.SetStream(arena_.stream);
   clock.Mark();
+  SubStageClock mixer_clock("GUFO_PROFILE_SSM");
+  mixer_clock.SetStream(arena_.stream);
+  mixer_clock.AddStage("qkv-gemm");
+  mixer_clock.AddStage("gate-gemm");
+  mixer_clock.AddStage("alpha-gemm");
+  mixer_clock.AddStage("beta-gemm");
+  mixer_clock.AddStage("recurrence");
+  mixer_clock.AddStage("act-prep");
+  mixer_clock.AddStage("out-gemm");
   for (std::uint32_t l = 0; l < config.num_layers; ++l) {
     clock.LayerKind(weights_.layers[l].is_full_attention);
     clock.Mark();
@@ -516,6 +526,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                     arena_.d_scratch_q8_act);
       }
     } else {
+      mixer_clock.Mark();
       if (!half_prefill && !norm_feeds_q8_only) {
         LaunchQuantizeActivationQ8_1(arena_.d_scratch_bf16,
                                      arena_.d_scratch_q8_act, batch_size,
@@ -524,15 +535,19 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       gemm_weight(layer.attn_qkv, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_ssm_qkv, ssm_qkv_size, hidden_size,
                   arena_.d_scratch_q8_act);
+      mixer_clock.Mark();
       gemm_weight(layer.attn_gate, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_ssm_gate, ssm_inner_size, hidden_size,
                   arena_.d_scratch_q8_act);
+      mixer_clock.Mark();
       gemm_weight(layer.ssm_alpha, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_alpha_buf, time_step_rank, hidden_size,
                   arena_.d_scratch_q8_act);
+      mixer_clock.Mark();
       gemm_weight(layer.ssm_beta, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_beta_buf, time_step_rank, hidden_size,
                   arena_.d_scratch_q8_act);
+      mixer_clock.Mark();
       if (arena_.IsSsmReplayCaptureActive()) {
         LaunchCaptureBatchedSsmReplay(
             arena_.d_ssm_qkv, arena_.d_alpha_buf, arena_.d_beta_buf,
@@ -578,6 +593,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
             arena_.GetRecurrentStateStorage());
       }
 
+      mixer_clock.Mark();
       if (half_prefill) {
         if (!ssm_row_split) {
           LaunchFloatToFp16(arena_.d_ssm_out, arena_.d_scratch_bf16,
@@ -596,6 +612,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                                      arena_.d_scratch_q8_act, batch_size,
                                      ssm_inner_size, arena_.stream);
       }
+      mixer_clock.Mark();
       if (half_prefill) {
         LaunchBatchedQuantGEMMResidualFp16(
             layer.ssm_out.type, layer.ssm_out.data, arena_.d_scratch_bf16,
@@ -606,6 +623,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                     arena_.d_attn_out, hidden_size, ssm_inner_size,
                     arena_.d_scratch_q8_act);
       }
+      mixer_clock.Mark();
     }
 
     clock.Mark();
@@ -783,6 +801,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   }
   clock.Mark();
   clock.Report(config.num_layers);
+  mixer_clock.Report("mixer");
+  FlushFfnProfile();
   last_hidden_offset_ = (batch_size - 1) * hidden_size;
 
   if (!compute_logits) {

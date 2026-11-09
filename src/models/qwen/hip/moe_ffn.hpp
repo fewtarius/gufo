@@ -3,6 +3,7 @@
 
 #include "src/core/model_config.hpp"
 #include "src/models/qwen/hip/executor.hpp"
+#include "src/models/qwen/hip/profile.hpp"
 #include "src/models/qwen/state.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
@@ -46,6 +47,13 @@ void MoeFfnBatch(const models::QwenLayerWeights& layer,
 /// Runs every layer's expert kernels once outside a graph capture, so the
 /// matrix library's workspace pool is sized before the decode graph is
 /// captured.
+/// The feed-forward's sub-stage clock, shared across every layer of a chunk.
+/// Exposed so the chunk trailer can flush it once instead of once per layer.
+SubStageClock& FfnClock();
+
+/// Reports and resets the accumulated feed-forward stages.
+void FlushFfnProfile();
+
 void WarmMoeDecode(const models::QwenModelWeights& weights,
                    const core::ModelConfig& config,
                    const QwenMoeScratch& scratch, const float* x,

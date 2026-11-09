@@ -11,7 +11,7 @@
 #include "src/families/qwen/kernels/ops/prefill_fp16.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/moe_ffn.hpp"
-#include "src/models/qwen/hip/profile.hpp"
+#include "src/core/hip/profile.hpp"
 
 namespace gufo::hip {
 

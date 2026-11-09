@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_PROFILE_HPP_
-#define GUFO_MODELS_QWEN_HIP_PROFILE_HPP_
+#ifndef GUFO_CORE_HIP_PROFILE_HPP_
+#define GUFO_CORE_HIP_PROFILE_HPP_
 
 // GPU-event sub-stage timing, shared by the layer loop and the feed-forward so
 // both can be broken down with the same tool and the same output shape.
@@ -47,6 +47,16 @@ public:
       return;
     }
     marks_.push_back(event);
+  }
+
+  /// Drops marks recorded for a forward that will not be reported, so a
+  /// graph-replayed step that never reaches the report does not accumulate
+  /// events across an entire generation.
+  void Discard() {
+    for (hipEvent_t event : marks_) {
+      (void)hipEventDestroy(event);
+    }
+    marks_.clear();
   }
 
   /// Buckets marks into layers only when their count divides evenly, so a layer
@@ -111,4 +121,4 @@ private:
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_PROFILE_HPP_
+#endif  // GUFO_CORE_HIP_PROFILE_HPP_

@@ -205,6 +205,11 @@ struct ComponentTextCache::Impl {
   // Ledger room for index and request metadata when the RAM cache is off. It
   // caps accounting only; the memory is not reserved.
   static constexpr std::size_t kOffMetadataBytes = std::size_t{64} << 20;
+  // A retained checkpoint is dominated by the recurrent state, so a budget
+  // below this cannot hold one and every pin would be refused after being
+  // counted. The pool applies the same floor to a requested budget.
+  static constexpr std::size_t kMinimumRetainedCacheBytes = std::size_t{512}
+                                                            << 20;
   // Queue ownership plus transient submissions before superseded callbacks
   // release their serving handles. No callback runs under the serving mutex.
   std::array<std::shared_ptr<const cache::Checkpoint>, 2 * kPersistenceDepth>
@@ -331,10 +336,48 @@ struct ComponentTextCache::Impl {
       // charges above the budget are refused here, as without pins.
       const auto limit =
           std::min({ram + pinned, max_bytes, ledger.Limits().ram_bytes});
-      ledger.ConstrainLimits({limit + staging, limit, staging, limit});
-      ram = std::min(ram, limit > pinned ? limit - pinned : 0);
-      resources->commit_backing(ram);
-      slot_pinned_bytes = pinned;
+      // The slots were sized from a claim taken before the sessions allocated
+      // their state, and on a unified-memory APU that state comes out of the
+      // same pool. At a long context the fresh claim therefore reports less
+      // room than the slots already hold, and the ledger refuses the reduction.
+      //
+      // Retention is optional and a refused pin costs a re-prefill, while a
+      // failed load costs the model, so stop retaining rather than fail. The
+      // ledger is held at what the slots already charged and the cache is left
+      // in the no-pool configuration, which is the one a disabled cache gets.
+      if (limit < ledger.Snapshot().total_bytes) {
+        const auto spent = ledger.Snapshot();
+        Logger::Warn("cache",
+                     "schema=component-cache-v1 event=ram_cache_refused "
+                     "reason=slots_exceed_available ledger_bytes=" +
+                         std::to_string(spent.total_bytes) +
+                         " available_bytes=" + std::to_string(limit) +
+                         " fallback=sessions_reuse_live_state");
+        // Reduce the ledger to what the slots have already charged rather than
+        // leaving the stale ceiling in place. A ledger that still believes it
+        // has the old room lets a slot spend it when a request first runs, and
+        // that starves the request's own workspace. A refused pin only costs a
+        // re-prefill, so hold the ledger at its current usage and admit nothing
+        // further.
+        const auto total = std::max(limit + staging, spent.total_bytes);
+        const auto ram_limit = std::max(limit, spent.ram_bytes);
+        const auto pinned_limit =
+            std::max(ram_limit, spent.persistence_pinned_bytes);
+        ledger.ConstrainLimits({total, ram_limit, staging, pinned_limit});
+        ram = 0;
+        ram_enabled = false;
+        resources->prepare_prefill = nullptr;
+        resources->can_capture = nullptr;
+        resources->allocate =
+            [](const cache::PayloadRequest&) -> ComponentCaptureBuffer {
+          throw cache::ResourceExhausted();
+        };
+      } else {
+        ledger.ConstrainLimits({limit + staging, limit, staging, limit});
+        ram = std::min(ram, limit > pinned ? limit - pinned : 0);
+        resources->commit_backing(ram);
+        slot_pinned_bytes = pinned;
+      }
     } else {
       // Slots allocated under the host ceiling; return to the budget. This
       // ignores pinned_bytes: a runner that pins must commit backing.

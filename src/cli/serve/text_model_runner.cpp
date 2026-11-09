@@ -238,7 +238,7 @@ struct TextRunnerPool::Impl {
       const auto resources = validated.runner->ResourceClaim();
       const auto automatic =
           resources.retained_snapshot_capacity_bytes.value_or(0);
-      const auto ceiling =
+      auto ceiling =
           resources.retained_snapshot_ceiling_bytes.value_or(automatic);
       const auto requested =
           ram_cache_options.capacity_bytes
@@ -251,6 +251,28 @@ struct TextRunnerPool::Impl {
       // The state claim includes lazy image/rollback storage, not startup
       // usage.
       auto effective = std::min(requested, ceiling);
+      // The claim above reports the pool before the sessions allocate their
+      // state, and every session's state is charged against that same pool. On
+      // a unified-memory APU the state is most of it at a long context: at
+      // 131072 tokens a session reserves 1751 MiB of the 1907 MiB the claim
+      // reports free. A cache sized from the un-reduced figure takes memory the
+      // session needs, and the request that follows has nowhere to put its
+      // logits and sampling workspace, which surfaces as a logit distribution
+      // with no finite values in it rather than as an allocation failure.
+      //
+      // Cap by what will remain so retention cannot starve a session. The later
+      // claim, taken after the state is charged, needs no adjustment, which is
+      // why this belongs here and not in the runner: the runner cannot tell the
+      // two claims apart, and subtracting there would count the state twice.
+      if (resources.state_capacity_bytes.has_value() &&
+          resources.per_request_state_bytes.has_value()) {
+        const auto reserved = *resources.per_request_state_bytes * state_count;
+        const auto remaining = *resources.state_capacity_bytes > reserved
+                                   ? *resources.state_capacity_bytes - reserved
+                                   : 0;
+        ceiling = std::min(ceiling, remaining);
+        effective = std::min(effective, remaining);
+      }
       auto ram_enabled = ram_cache_options.enabled;
       if (ram_enabled) {
         // A retained checkpoint is a fixed-size payload dominated by the
@@ -277,7 +299,13 @@ struct TextRunnerPool::Impl {
                   " floor_bytes=" + std::to_string(kMinimumRetainedCacheBytes) +
                   " fallback=sessions_reuse_live_state");
           ram_enabled = false;
-          effective = std::max(requested, ceiling);
+          // No device allowance. `effective` sizes the cache's own device
+          // resources, so leaving it at the requested figure allocates memory
+          // the pool does not have even though retention is off, and the first
+          // request then comes back with a logit distribution that has no
+          // finite values in it. `ceiling` still bounds the ledger, so existing
+          // state is unaffected.
+          effective = 0;
         }
       }
       component_cache = std::make_unique<ComponentTextCache>(

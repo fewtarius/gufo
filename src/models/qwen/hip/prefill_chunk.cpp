@@ -449,7 +449,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
           config.num_key_value_heads, config.head_dim, arena_.stream,
           /*lse_out=*/nullptr, /*key_begin=*/0,
           /*skip_kv_write=*/kv_already_written, attention_workspace.gate,
-          attention_workspace.up, output_first_row);
+          attention_workspace.up, output_first_row, total_k);
       if (wmma_attention) {
         detail::EmitAttentionDispatch("prefill_wmma", "");
       }

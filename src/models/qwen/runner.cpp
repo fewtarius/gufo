@@ -678,12 +678,16 @@ public:
           heap_free != 0) {
         const std::uint64_t budget = hip::HeapBudget(heap_free);
         auto& policy = execution_policy_;
-        // Nothing wider than 2048 until the matrix-core attention path above
-        // that width is fixed: it faults with "Page not present" at long
-        // prompts, which is exactly the case a wide chunk is good for. 2048 is
-        // the widest width the attention path has been verified at, across
-        // repeated runs, so it is the ceiling the resolution may pick.
-        for (const std::uint32_t candidate : {std::uint32_t{2048}}) {
+        // Widest first. 3072 is the widest width verified end to end: a
+        // 9817-token prompt runs with no fault and greedy output is
+        // bit-identical to the 2048 width across both head-group sizes the pack
+        // can choose. 4096 is deliberately absent. It is probably sound now
+        // that the pack reads the model's own head stride, but it cannot be
+        // made to fit any model on a 20 GiB pool, so it has never been
+        // executed, and a width that has never run must not be reachable by a
+        // host that can afford it.
+        for (const std::uint32_t candidate :
+             {std::uint32_t{3072}, std::uint32_t{2048}}) {
           policy.prompt_chunk_rows = candidate;
           const auto usage = hip::QwenGpuExecutor::EstimateMemoryUsage(
               model_->GetConfig(), max_context_, policy);

@@ -64,6 +64,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <type_traits>
 
@@ -617,11 +618,12 @@ __launch_bounds__(256, (__clang_major__ >= 24 && kHeadMajor) ? 6 : 2) __global__
 
 // FFN scratch is idle during attention. Keep K head-major and transpose each
 // 16-key V tile into the layout consumed by WMMA. Persistent KV is unchanged.
-template<QwenKvFormat Format>
+template<QwenKvFormat Format, std::uint32_t kKvHeadsT>
 __global__ void PackAttentionHeads(const void* keys, const void* values,
                                    __half* packed_keys, __half* packed_values,
                                    std::uint32_t length,
-                                   std::size_t layer_offset) {
+                                   std::size_t layer_offset,
+                                   std::size_t element_limit) {
   __shared__ __half tile[16][kHeadDim + 8];
   // Adjacent blocks read adjacent heads of the same source token tile.
   const std::uint32_t head = blockIdx.x, base = blockIdx.y * 16;
@@ -630,16 +632,39 @@ __global__ void PackAttentionHeads(const void* keys, const void* values,
     const std::uint32_t dim = (i % (kHeadDim / 8)) * 8;
     uint4 value = make_uint4(0, 0, 0, 0);
     if (base + key < length) {
+      // The source row stride is the model's KV head count, not the file-scope
+      // constant that names the default geometry. Using the latter doubled the
+      // stride for a 2-head model: every key was read from twice its row, which
+      // stayed inside the plane for short prompts and ran off the end of it for
+      // long ones.
       const auto src =
           layer_offset +
-          (static_cast<std::size_t>(base + key) * kKvHeads + head) * kHeadDim +
+          (static_cast<std::size_t>(base + key) * kKvHeadsT + head) * kHeadDim +
           dim;
-      const auto dst =
-          (static_cast<std::size_t>(head) * length + base + key) * kHeadDim +
-          dim;
-      *reinterpret_cast<uint4*>(packed_keys + dst) =
-          detail::KvPlaneAt<Format>(keys, src).LoadHalf8(0);
-      value = detail::KvPlaneAt<Format>(values, src).LoadHalf8(0);
+      // The source index is the one number neither the caller nor this kernel
+      // can check from the other side, so report it here if it leaves the
+      // plane. Skipping the read keeps a bad index from faulting the device,
+      // which turns a crash into a wrong answer the caller can see.
+      // A zero limit means the caller did not supply the plane capacity, which
+      // is how the kernel bench calls this. Treat that as unchecked rather than
+      // as a zero-length plane, which would skip every read.
+      if (element_limit != 0 && src + 8 > element_limit) {
+        if (threadIdx.x == 0 && dim == 0) {
+          printf(
+              "[pack-oob] layer_off=%llu head=%u base=%u key=%u src=%llu "
+              "limit=%llu length=%u\n",
+              static_cast<unsigned long long>(layer_offset), head, base, key,
+              static_cast<unsigned long long>(src),
+              static_cast<unsigned long long>(element_limit), length);
+        }
+      } else {
+        const auto dst =
+            (static_cast<std::size_t>(head) * length + base + key) * kHeadDim +
+            dim;
+        *reinterpret_cast<uint4*>(packed_keys + dst) =
+            detail::KvPlaneAt<Format>(keys, src).LoadHalf8(0);
+        value = detail::KvPlaneAt<Format>(values, src).LoadHalf8(0);
+      }
     }
     *reinterpret_cast<uint4*>(&tile[key][dim]) = value;
   }
@@ -682,7 +707,7 @@ bool LaunchWmmaAttentionForGeometry(
     std::uint32_t max_context, hipStream_t stream, float* lse_out,
     std::uint32_t key_begin, bool skip_kv_write,
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
-    std::size_t first_query) {
+    std::size_t first_query, std::size_t kv_plane_elements) {
   constexpr std::uint32_t kGqaW = kQHeads / kKvHeadsW;
   constexpr std::uint32_t kKvWidthW = kKvHeadsW * kHeadDim;
   static_assert(kGqaW % kWmmaHeads == 0,
@@ -755,13 +780,15 @@ bool LaunchWmmaAttentionForGeometry(
       const std::size_t group_offset =
           layer_cache_offset + (static_cast<std::size_t>(first) * kHeadDim);
       if (compact.format == QwenKvFormat::kQ8_0) {
-        PackAttentionHeads<QwenKvFormat::kQ8_0>
+        PackAttentionHeads<QwenKvFormat::kQ8_0, kKvHeadsW>
             <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(
-                layer_k, layer_v, packed_k, packed_v, length, group_offset);
+                layer_k, layer_v, packed_k, packed_v, length, group_offset,
+                kv_plane_elements);
       } else {
-        PackAttentionHeads<QwenKvFormat::kFp16>
+        PackAttentionHeads<QwenKvFormat::kFp16, kKvHeadsW>
             <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(
-                layer_k, layer_v, packed_k, packed_v, length, group_offset);
+                layer_k, layer_v, packed_k, packed_v, length, group_offset,
+                kv_plane_elements);
       }
       const dim3 group_grid(grid.x, heads * (kGqaW / kWmmaHeads));
       WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, true, QwenKvFormat::kFp16,
@@ -798,7 +825,7 @@ bool LaunchQwenWmmaAttention(
     std::uint32_t num_kv_heads, std::uint32_t head_dim, hipStream_t stream,
     float* lse_out, std::uint32_t key_begin, bool skip_kv_write,
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
-    std::size_t first_query) {
+    std::size_t first_query, std::size_t kv_plane_elements) {
   const detail::AttentionSupportParams support_params{
       .batch_size = batch_size,
       .start_pos = start_pos,
@@ -823,7 +850,8 @@ bool LaunchQwenWmmaAttention(
                                           decltype(tag_kv)::value>(
         q, k, v, gate, k_cache, v_cache, compact, out_context, layer_idx,
         start_pos, batch_size, max_context, stream, lse_out, key_begin,
-        skip_kv_write, packed_k_workspace, packed_v_workspace, first_query);
+        skip_kv_write, packed_k_workspace, packed_v_workspace, first_query,
+        kv_plane_elements);
   };
   switch ((num_heads * 1000U) + num_kv_heads) {
     case (24U * 1000U) + 4U:

@@ -82,6 +82,11 @@ public:
   /// Host bytes SaveSnapshot needs for the current position.
   [[nodiscard]] std::size_t SnapshotBytes() const noexcept;
 
+  /// Upper bound on SnapshotBytes() across every position this session can
+  /// reach. The component cache sizes its per-checkpoint buffer once, so it
+  /// needs a fixed figure while the live payload shrinks with the position.
+  [[nodiscard]] std::size_t MaxSnapshotBytes() const noexcept;
+
   /// Copies the KV caches and the last logits to host memory. The full
   /// attention layers contribute their live rows; the sliding-window layers
   /// contribute only the rows their window can still reach.

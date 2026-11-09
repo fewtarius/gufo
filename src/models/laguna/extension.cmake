@@ -36,6 +36,7 @@ gufo_extension_target(
   SOURCES
     gpu/device_model.cpp
     gpu/engine.cpp
+    continuation_adapter.cpp
     runner.cpp
     drivers.cpp
     provider.cpp

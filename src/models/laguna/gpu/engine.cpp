@@ -1476,6 +1476,23 @@ std::size_t Session::SnapshotBytes() const noexcept {
   return total;
 }
 
+std::size_t Session::MaxSnapshotBytes() const noexcept {
+  const Config& c = impl_->model->config;
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  const std::uint32_t position = impl_->capacity;
+  std::size_t total = kSnapshotHeaderBytes;
+  for (std::uint32_t il = 0; il < c.num_layers; ++il) {
+    total += sizeof(std::uint32_t);
+    total += 2 * LiveRows(il, position) * kv_row_bytes;
+    total += impl_->PooledSnapshotBytes(il, position);
+  }
+  total += std::size_t{c.vocab_size} * sizeof(float);
+  if (impl_->dflash != nullptr) {
+    total += impl_->dflash->PersistentPayloadBytes();
+  }
+  return total;
+}
+
 bool Session::SaveSnapshot(std::span<std::uint8_t> out,
                            std::string* error_msg) const {
   const Config& c = impl_->model->config;

@@ -25,9 +25,11 @@
 #include <utility>
 #include <vector>
 
+#include "gufo/ext/component_cache_resources.hpp"
 #include "gufo/ext/host_budget.hpp"
 #include "src/families/qwen/text/tokenizer.hpp"
 #include "src/models/laguna/chat_template.hpp"
+#include "src/models/laguna/continuation_adapter.hpp"
 #include "src/models/laguna/gpu/engine.hpp"
 #include "src/models/laguna/tool_calls.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
@@ -56,6 +58,11 @@ std::vector<std::int32_t> LagunaEngineTokens(
 
 constexpr std::string_view kLagunaStateAbi = "laguna-rocm-session-v1";
 
+[[nodiscard]] inline hip::ComponentCacheHooks HipComponentCacheHooks() {
+  return {[] { return ext::HostSnapshotCeilingBytes(); },
+          [](std::string_view) {}, [](std::string_view) {}};
+}
+
 }  // namespace
 
 }  // namespace gufo::models::laguna
@@ -70,11 +77,20 @@ public:
   LagunaTextRunnerState(const std::shared_ptr<LagunaModel>& model,
                         std::uint32_t max_context) {
     std::string error;
-    session_ = model->CreateSession(max_context + LagunaSession::kMaxVerifyRows,
-                                    &error);
-    if (session_ == nullptr) {
+    owned_ = model->CreateSession(max_context + LagunaSession::kMaxVerifyRows,
+                                  &error);
+    if (owned_ == nullptr) {
       throw std::runtime_error("Failed to create Laguna session: " + error);
     }
+    session_ = owned_.get();
+  }
+
+  // The component cache owns execution storage. The runner state executes on
+  // the session the slot bound rather than allocating one of its own.
+  LagunaTextRunnerState(std::shared_ptr<LagunaModel> model,
+                        std::uint32_t max_context, LagunaSession& session)
+      : model_(std::move(model)), session_(&session) {
+    (void)max_context;
   }
 
   void Invalidate() noexcept override {
@@ -105,7 +121,9 @@ public:
   }
 
 private:
-  std::unique_ptr<LagunaSession> session_;
+  std::shared_ptr<LagunaModel> model_;
+  std::unique_ptr<LagunaSession> owned_;
+  LagunaSession* session_{nullptr};
   std::size_t position_{0};
   DrafterStats drafter_stats_;
 };
@@ -419,7 +437,32 @@ public:
   }
 
   [[nodiscard]] std::unique_ptr<TextRunnerState> CreateState() const override {
-    return std::make_unique<LagunaTextRunnerState>(model_, max_context_);
+    throw std::logic_error(
+        "Laguna execution slots are owned by the component cache");
+  }
+
+  [[nodiscard]] bool UsesComponentCache() const override { return true; }
+
+  [[nodiscard]] std::unique_ptr<ComponentCacheResources>
+  CreateComponentCacheResources(cache::ResourceLedger& ledger,
+                                std::size_t) const override {
+    return hip::CreateHipComponentCacheResources(
+        std::make_unique<LagunaComponentAdapter>(
+            model_, max_context_,
+            LagunaProcessIdentity(model_.get(), max_context_)),
+        ledger, HipComponentCacheHooks());
+  }
+
+  [[nodiscard]] std::unique_ptr<TextRunnerState> BindComponentState(
+      cache::Adapter& adapter, cache::Slot& slot) const override {
+    auto& laguna = dynamic_cast<LagunaComponentAdapter&>(adapter);
+    return std::make_unique<LagunaTextRunnerState>(
+        model_, max_context_, laguna.Session(slot));
+  }
+
+  void ReconcileComponentState(TextRunnerState& state,
+                               std::size_t position) const override {
+    RequireLagunaState(state).set_position(position);
   }
 
   void PreparePrefixReuse(

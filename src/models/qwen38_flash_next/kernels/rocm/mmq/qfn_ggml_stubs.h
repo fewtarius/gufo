@@ -55,11 +55,14 @@
 #endif
 
 #ifndef GGML_ABORT
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 #define GGML_ABORT(fmt, ...) \
     do { \
         fprintf(stderr, "GGML_ABORT: " fmt " at %s:%d\n", ##__VA_ARGS__, __FILE__, __LINE__); \
         abort(); \
     } while (0)
+#pragma clang diagnostic pop
 #endif
 
 #ifndef GGML_UNUSED

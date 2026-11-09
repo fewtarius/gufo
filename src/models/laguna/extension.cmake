@@ -26,43 +26,46 @@ if(TARGET gufo_laguna)
   )
 endif()
 
-if(ENGINE_ENABLE_HIP)
-  gufo_extension_target(
-    NAME gufo_laguna_hip
-    SOURCES
-      gpu/device_model.cpp
-      gpu/engine.cpp
-      runner.cpp
-      drivers.cpp
-      provider.cpp
-    LINK_LIBRARIES
-      gufo_laguna
-      gufo_qwen38_flash_next
-      gufo_qwen38_flash_next_mmq
-      gufo_qwen_text
-      gufo_cache_hip
-      gufo_compare
-      hip::host
-      roc::hipblas
-      roc::hipblaslt
-  )
+# Declared unconditionally: the registry validates that every target named
+# in extension.json exists in the build, and gufo_extension_target
+# early-returns for a disabled (HIP-off) target. Declaring inside
+# if(ENGINE_ENABLE_HIP) left the target undefined and broke any HIP-off
+# configure.
+gufo_extension_target(
+  NAME gufo_laguna_hip
+  SOURCES
+    gpu/device_model.cpp
+    gpu/engine.cpp
+    runner.cpp
+    drivers.cpp
+    provider.cpp
+  LINK_LIBRARIES
+    gufo_laguna
+    gufo_qwen38_flash_next
+    gufo_qwen38_flash_next_mmq
+    gufo_qwen_text
+    gufo_cache_hip
+    gufo_compare
+    hip::host
+    roc::hipblas
+    roc::hipblaslt
+)
 
-  if(TARGET gufo_laguna_hip)
-    gufo_extension_hip_sources(gufo_laguna_hip
-      SOURCES
-        gpu/kernels/kernels.hip.cpp
-    )
-    target_compile_definitions(gufo_laguna_hip PRIVATE QFN_MMQ_BUILD=1)
-    target_compile_options(gufo_laguna_hip PRIVATE
-      $<$<COMPILE_LANGUAGE:CXX>:-O2>
-      $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-value;-Wno-unused-command-line-argument>)
-    target_include_directories(gufo_laguna_hip SYSTEM PUBLIC
-      ${HIPCUB_INCLUDE_DIR}
-      ${ROCPRIM_INCLUDE_DIR}
-      ${ROCWMMA_INCLUDE_DIR})
-    target_include_directories(gufo_laguna_hip PUBLIC
-      ${PROJECT_SOURCE_DIR}
-      ${GUFO_EXTENSION_BUILD_ROOT}
-    )
-  endif()
+if(TARGET gufo_laguna_hip)
+  gufo_extension_hip_sources(gufo_laguna_hip
+    SOURCES
+      gpu/kernels/kernels.hip.cpp
+  )
+  target_compile_definitions(gufo_laguna_hip PRIVATE QFN_MMQ_BUILD=1)
+  target_compile_options(gufo_laguna_hip PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-O2>
+    $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-value;-Wno-unused-command-line-argument>)
+  target_include_directories(gufo_laguna_hip SYSTEM PUBLIC
+    ${HIPCUB_INCLUDE_DIR}
+    ${ROCPRIM_INCLUDE_DIR}
+    ${ROCWMMA_INCLUDE_DIR})
+  target_include_directories(gufo_laguna_hip PUBLIC
+    ${PROJECT_SOURCE_DIR}
+    ${GUFO_EXTENSION_BUILD_ROOT}
+  )
 endif()

@@ -72,9 +72,9 @@ Q8KvLoadHalf2(const Q8KvBlock* base, std::size_t absolute) noexcept {
 ///
 /// The four elements share one block: every Qwen attention route reads
 /// vectors of four, and their bases are multiples of four.
-__device__ __forceinline__ void Q8KvLoadHalf4(const Q8KvBlock* base,
-                                              std::size_t absolute,
-                                              __half2& lower, __half2& upper) {
+__device__ __forceinline__ void Q8KvLoadHalf4(
+    const Q8KvBlock* base, std::size_t absolute, __half2& lower,
+    __half2& upper) {
   const Q8KvBlock& block = base[absolute / 32];
   const std::uint32_t offset = static_cast<std::uint32_t>(absolute % 32);
   lower = __halves2half2(Q8KvHalf(block, offset), Q8KvHalf(block, offset + 1));

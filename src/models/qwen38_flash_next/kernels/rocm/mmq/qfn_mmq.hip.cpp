@@ -187,6 +187,13 @@ int qfn_mmq_dense_gemm_preq_impl(
         0, s13, 0,
         use_stream_k,
         ne11,
+        nullptr,
+        (int64_t)0,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        0.0F,
     };
     const bool inline_sanitize =
         type == GGML_TYPE_Q8_0 && !use_stream_k;

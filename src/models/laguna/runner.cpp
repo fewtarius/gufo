@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <gufo/ext/gguf_reader.hpp>
 #include <gufo/ext/host.hpp>
 #include <memory>
@@ -79,6 +80,7 @@ public:
   void Invalidate() noexcept override {
     session_->Reset();
     position_ = 0;
+    drafter_stats_ = {};
   }
   [[nodiscard]] TextRunnerMeasuredResources MeasuredResources()
       const noexcept override {
@@ -90,9 +92,22 @@ public:
   [[nodiscard]] std::size_t position() const noexcept { return position_; }
   void set_position(std::size_t position) noexcept { position_ = position; }
 
+  struct DrafterStats {
+    std::uint32_t proposed = 0;
+    std::uint32_t accepted = 0;
+    bool suspended = false;
+  };
+  [[nodiscard]] const DrafterStats& drafter_stats() const noexcept {
+    return drafter_stats_;
+  }
+  [[nodiscard]] DrafterStats& drafter_stats() noexcept {
+    return drafter_stats_;
+  }
+
 private:
   std::unique_ptr<LagunaSession> session_;
   std::size_t position_{0};
+  DrafterStats drafter_stats_;
 };
 
 LagunaTextRunnerState& RequireLagunaState(TextRunnerState& state) {
@@ -422,6 +437,11 @@ public:
       throw std::logic_error("Laguna prefill offset does not match state");
     if (offset >= prompt.size())
       throw std::logic_error("Laguna prefill has no remaining input");
+    // A fresh request starts a new acceptance history; a continued
+    // conversation keeps the previous request's, which still describes
+    // how well the drafter tracks this context.
+    if (offset == 0)
+      laguna.drafter_stats() = {};
     const std::size_t consumed = std::min<std::size_t>(
         {max_input_tokens, prompt.size() - offset, kPrefillChunk});
     const auto chunk = LagunaEngineTokens(prompt.subspan(offset, consumed));
@@ -500,9 +520,38 @@ public:
     // running plain decode for every sampled request, which is most of
     // them: an agent client that sends a temperature gets none of the
     // documented DFlash2 decode speed.
+    //
+    // Acceptance gate: drafting only pays when enough drafts stick.
+    // Measured on gfx1151 (docs/models/laguna/KV-Q8.md, BENCHMARKS.md),
+    // break-even sits near 45-50% acceptance at depth: 57% acceptance
+    // decodes 24.5 tok/s against 18-21 plain, 40% decodes 16.1 against
+    // 18.1. Agent traffic at temperature 0.7+ sits at 17-36% (30% steady
+    // in serving logs), so once a session's acceptance drops below the
+    // threshold over a minimum sample, the drafter is suspended for the
+    // rest of the request and plain decode runs instead. GUFO_DFLASH_GATE
+    // =0 restores the ungated behaviour.
+    static const bool kDraftGateEnabled = [] {
+      const char* v = std::getenv("GUFO_DFLASH_GATE");
+      return v == nullptr || std::strcmp(v, "0") != 0;
+    }();
+    static const std::uint32_t kDraftGatePercent = [] {
+      if (const char* v = std::getenv("GUFO_DFLASH_GATE_THRESHOLD")) {
+        const auto pct =
+            static_cast<std::uint32_t>(std::strtoul(v, nullptr, 10));
+        if (pct > 0 && pct <= 100)
+          return pct;
+      }
+      return 45U;
+    }();
+    constexpr std::uint32_t kDraftGateMinProposals = 24;
+    const auto& stats = laguna.drafter_stats();
+    const bool acceptance_ok =
+        !kDraftGateEnabled || !stats.suspended ||
+        stats.proposed < kDraftGateMinProposals ||
+        stats.accepted * 100U >= kDraftGatePercent * stats.proposed;
     const bool drafter_ready =
-        max_tokens > 1 && max_draft_tokens_ > 0 && drafter != nullptr &&
-        model_->HasDflash() &&
+        acceptance_ok && max_tokens > 1 && max_draft_tokens_ > 0 &&
+        drafter != nullptr && model_->HasDflash() &&
         drafter->GetInjectedContextLength() == laguna.session().Position();
     if (!drafter_ready) {
       if (std::getenv("LAGUNA_DFLASH_DEBUG") != nullptr) {
@@ -690,6 +739,25 @@ public:
     }
     step.draft_accepted_tokens = kept;
     step.stop = stopped;
+    {
+      auto& draft_stats = laguna.drafter_stats();
+      draft_stats.proposed += drafts.size();
+      draft_stats.accepted += kept;
+      if (kDraftGateEnabled && !draft_stats.suspended &&
+          draft_stats.proposed >= kDraftGateMinProposals &&
+          draft_stats.accepted * 100U <
+              kDraftGatePercent * draft_stats.proposed) {
+        draft_stats.suspended = true;
+        Logger::Info("laguna",
+                     "event=dflash_suspended accepted=" +
+                         std::to_string(draft_stats.accepted) +
+                         " proposed=" + std::to_string(draft_stats.proposed) +
+                         " acceptance_pct=" +
+                         std::to_string(100.0 * draft_stats.accepted /
+                                        draft_stats.proposed) +
+                         " gate_pct=" + std::to_string(kDraftGatePercent));
+      }
+    }
     return step;
   }
 

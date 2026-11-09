@@ -494,6 +494,10 @@ int ds4_mmq_dense_impl(
         /*stride_sample_x=*/0, /*stride_sample_y=*/s13, /*stride_sample_dst=*/0,
         /*use_stream_k=*/use_stream_k,
         /*ncols_max=*/ne11,
+        /*x_soa=*/nullptr,
+        /*soa_blocks=*/0,
+        /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     const bool inline_sanitize =
         type == GGML_TYPE_Q8_0 && !use_stream_k;
@@ -589,6 +593,10 @@ extern "C" int ds4_mmq_q8_0_dense_preq(
         /*stride_sample_x=*/0, /*stride_sample_y=*/s12, /*stride_sample_dst=*/0,
         /*use_stream_k=*/use_stream_k,
         /*ncols_max=*/(int64_t)N,
+        /*x_soa=*/nullptr,
+        /*soa_blocks=*/0,
+        /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     const bool inline_sanitize = !use_stream_k;
     args.sanitize_output = inline_sanitize;
@@ -956,6 +964,8 @@ int ds4_mmq_moe_impl(
         /*ncols_max=*/ne_get_rows,
         /*x_soa=*/x_soa,
         /*soa_blocks=*/soa_blocks,
+        /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
 
     mul_mat_q_case<type>(*ctx, args, stream);
@@ -1448,6 +1458,8 @@ int ds4_mmq_moe_pair_impl(
         /*ncols_max=*/routed_ncols_max,
         /*x_soa=*/xa_soa,
         /*soa_blocks=*/soa_blocks,
+        /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
     };
     args.ncols_grid_max = routed_ncols_grid;
     args.mmq_x_request = g_routed_tile_cols;
@@ -1552,6 +1564,8 @@ int ds4_mmq_moe_pair_impl(
             /*ncols_max=*/routed_ncols_max,
             /*x_soa=*/fused_down->W_soa,
             /*soa_blocks=*/fused_down->soa_blocks,
+            /*epilogue_gate=*/nullptr,
+        /*epilogue_weights=*/nullptr,
         };
         down_args.ncols_grid_max = routed_ncols_grid;
         bool down_done = false;

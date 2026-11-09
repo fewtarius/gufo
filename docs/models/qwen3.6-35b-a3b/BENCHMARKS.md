@@ -33,6 +33,22 @@ llama.cpp's own log reports it.
 | 19,888 | 315.4 | 325.3 | +3.1% |
 | 93,011 | not measured | 197.7 | |
 
+### Prompt chunk width
+
+The chunk width is chosen at load from the memory left after the context the
+caller asked for, so a shorter context runs a wider chunk. That is a real speed
+difference, not a rounding error:
+
+| prompt tokens | 1024-row chunk (context 102400) | 2048-row chunk (context 16384) |
+| ---: | ---: | ---: |
+| 4,010 | 370.4 | 401.7 |
+| 4,673 | 383.3 | 397.6 |
+| 9,616 | 363.2 | 381.3 |
+| 14,653 | 343.3 | 360.3 |
+
+Ask for the context you need rather than the largest one available. The routed
+expert path fills fixed-width tiles, and a wider chunk fills more of them.
+
 The rate decays with prompt length on both engines because attention grows with
 context while the feed-forward does not. Gufo is a few percent behind at short
 prompts and a few percent ahead from roughly 14,000 tokens up.

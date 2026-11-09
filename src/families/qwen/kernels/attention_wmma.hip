@@ -742,8 +742,10 @@ bool LaunchWmmaAttentionForGeometry(
   // and speculative commit replays retain the canonical cache directly.
   // Reuse the same workspace for bounded groups at depths where all four
   // heads no longer fit; every head keeps its original key order.
-  if (batch_size >= 1024 && heads_per_group != 0 && key_begin < length &&
-      key_begin % kWmmaKeys == 0) {
+  static const bool packed_disabled =
+      std::getenv("GUFO_NO_PACKED_ATTN") != nullptr;
+  if (!packed_disabled && batch_size >= 1024 && heads_per_group != 0 &&
+      key_begin < length && key_begin % kWmmaKeys == 0) {
     auto* packed_k = reinterpret_cast<__half*>(packed_k_workspace.data());
     auto* packed_v = reinterpret_cast<__half*>(packed_v_workspace.data());
     for (std::uint32_t first = 0; first < kKvHeadsW; first += heads_per_group) {

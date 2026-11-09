@@ -142,28 +142,31 @@ and so a wider chunk, is faster here.
 
 ## Prompt throughput
 
-Context 16384, q8_0 KV cache, resolved chunk width 2048:
+Context 16384, q8_0 KV cache, resolved chunk width 3072:
 
 | prompt tokens | tok/s |
 | ---: | ---: |
-| 1820 | 337.9 |
-| 4478 | 450.0 |
-| 9762 | 429.6 |
-| 9762 | 428.8 |
-| 9762 | 426.0 |
+| 9795 | 449.2 |
+| 9795 | 447.5 |
+| 9795 | 447.1 |
+| 14368 | 433.3 |
+| 14368 | 432.6 |
+
+At width 2048 the same probes measure 425.7 at 9795 tokens and 405.1 at 14368, so
+the wider chunk is worth 5% and 7%. llama.cpp on this host and model reports
+385 t/s at 12288 tokens and 349 at 15516, so gufo is ahead of it across this
+range.
 
 ## Open work
 
-- **The prompt chunk is capped at 2048 rows until a fault above it is fixed.**
-  The matrix-core prefill attention fails with "Memory access fault ... Page not
-  present" on a long prompt when the chunk is wider than 2048. Without the cap, a
-  large-memory host would resolve 4096 rows and crash on exactly the long prompts
-  a wide chunk is for. The fault is localised to the branch that stages the
-  visible prefix into head-major FP16 (`GUFO_NO_PACKED_ATTN` removes it), and the
-  fault address lands well past the end of the KV cache rather than in the
-  staging workspace, so it is a bad source index rather than an overrun. Fixing
-  it is the gate on every routed-expert reuse gain, because a wider chunk is what
-  raises rows-per-expert-weight-read.
+- **The prompt chunk is capped at 3072 rows.** 4096 is absent from the resolver
+  because it cannot be made to fit this device at any context: it needs 1502 to
+  1630 MiB against a budget near 1430, so it has never been executed and its
+  correctness is not established. Everything the packed attention prefix needs to
+  be correct is now in place, so 4096 should join the list once it is verified on
+  a host with the memory. The last attention layer's source ends 256 elements
+  short of the plane at the full context, so that margin is worth re-checking at
+  any larger width or context.
 - **A 4096-row chunk is 198 MiB short of the heap budget here**: 1630 MiB needed
   against 1432. The largest reclaimable block is `down_out`, the per-expert
   down-projection output, which is materialised in full before the combine and is

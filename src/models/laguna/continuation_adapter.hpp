@@ -8,7 +8,7 @@
 #include <span>
 #include <vector>
 
-#include "src/cache/adapter.hpp"
+#include "gufo/ext/cache.hpp"
 #include "src/models/laguna/gpu/engine.hpp"
 
 namespace gufo::models::laguna {

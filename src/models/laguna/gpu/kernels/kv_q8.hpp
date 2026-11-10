@@ -9,7 +9,7 @@
 #ifndef GUFO_MODELS_LAGUNA_GPU_KERNELS_KV_Q8_HPP_
 #define GUFO_MODELS_LAGUNA_GPU_KERNELS_KV_Q8_HPP_
 
-#include "src/core/kv_codec/kv_q8_device.hpp"
+#include "gufo/ext/kv_codec.hpp"
 
 namespace gufo::models::laguna::gpu::rocm::detail {
 

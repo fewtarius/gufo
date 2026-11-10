@@ -5,7 +5,7 @@
 #include <gufo/ext/experimental/hip_utils.hpp>
 #include <stdexcept>
 
-#include "src/core/hip/profile.hpp"
+#include "gufo/ext/experimental/hip_profile.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/hip_common/gemm_route.hpp"
 #include "src/families/qwen/kernels/ops.hpp"

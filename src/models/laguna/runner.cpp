@@ -425,7 +425,14 @@ public:
 
   [[nodiscard]] sampling::JsonConstraint::ToolFormat ToolFormat()
       const override {
-    return sampling::JsonConstraint::ToolFormat::kLaguna;
+    // Laguna has no built-in format: its envelope is a provider syntax, so the
+    // host builds the grammar from the registered dialect named by
+    // ToolDialectId().
+    return sampling::JsonConstraint::ToolFormat::kJson;
+  }
+
+  [[nodiscard]] std::string ToolDialectId() const override {
+    return "laguna";
   }
 
   [[nodiscard]] std::optional<TextPreparedPrompt> PreparePrompt(

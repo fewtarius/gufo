@@ -13,7 +13,7 @@
 #include <memory>
 #include <vector>
 
-#include "src/core/hip/profile.hpp"
+#include "gufo/ext/experimental/hip_profile.hpp"
 #include "src/models/laguna/gpu/device_model.hpp"
 #include "src/models/laguna/gpu/kernels/kernels.hpp"
 #include "src/models/laguna/gpu/kernels/kv_q8.hpp"

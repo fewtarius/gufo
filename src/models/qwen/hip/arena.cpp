@@ -11,7 +11,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "src/core/logging/logging.hpp"
+#include "gufo/ext/logging.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/models/qwen/hip/executor.hpp"

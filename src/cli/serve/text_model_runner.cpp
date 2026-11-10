@@ -277,7 +277,7 @@ struct TextRunnerPool::Impl {
       const auto resources = validated.runner->ResourceClaim();
       const auto automatic =
           resources.retained_snapshot_capacity_bytes.value_or(0);
-      auto ceiling =
+      const auto ceiling =
           resources.retained_snapshot_ceiling_bytes.value_or(automatic);
       const auto requested =
           ram_cache_options.capacity_bytes
@@ -292,37 +292,12 @@ struct TextRunnerPool::Impl {
       // loading; on a host short of that reserve it is 0. The cache's own
       // metadata still needs a little room, or the load fails before the
       // cache can serve with the RAM cache off.
-      auto effective = std::min(requested, ceiling);
-      // The claim reports the pool before the sessions allocate their state,
-      // and every session's state is charged against that same pool. On a
-      // unified-memory APU the state is most of it at a long context: at
-      // 131072 tokens a session reserves 1751 MiB of the 1907 MiB the claim
-      // reports free. A cache sized from the un-reduced figure takes memory
-      // the session needs, and the request that follows has nowhere to put
-      // its logits and sampling workspace, which surfaces as a logit
-      // distribution with no finite values in it rather than as an allocation
-      // failure.
-      //
-      // Cap by what will remain so retention cannot starve a session. The
-      // later claim, taken after the state is charged, needs no adjustment,
-      // which is why this belongs here and not in the runner: the runner
-      // cannot tell the two claims apart, and subtracting there would count
-      // the state twice.
-      if (resources.state_capacity_bytes.has_value() &&
-          resources.per_request_state_bytes.has_value()) {
-        const auto reserved = *resources.per_request_state_bytes * state_count;
-        const auto remaining = *resources.state_capacity_bytes > reserved
-                                   ? *resources.state_capacity_bytes - reserved
-                                   : 0;
-        ceiling = std::min(ceiling, remaining);
-        effective = std::min(effective, remaining);
-      }
       // ResourceExhausted is a bad_alloc without a message of its own; name
       // the budget it refers to instead of a bare "std::bad_alloc".
       try {
         component_cache = std::make_unique<ComponentTextCache>(
-            validated.runner, state_count, effective, disk_cache_options,
-            !ram_cache_options.capacity_bytes,
+            validated.runner, state_count, std::min(requested, ceiling),
+            disk_cache_options, !ram_cache_options.capacity_bytes,
             std::max(ceiling, ComponentTextCache::kOffMetadataBytes),
             ram_cache_options.enabled);
       } catch (const cache::ResourceExhausted&) {

@@ -84,8 +84,33 @@ void ScanLagunaDialect(std::string_view text,
 }  // namespace
 
 void RegisterToolDialect() {
+  // The Laguna envelope names the function directly after the opener and tags
+  // each argument as <arg_key>KEY</arg_key><arg_value>VALUE</arg_value>. It is
+  // a tagged-argument grammar with Laguna's own tag text, so it is declared as
+  // a provider syntax rather than a built-in ToolFormat.
+  static const sampling::JsonConstraint::ToolSyntax kSyntax{
+      .open = std::string(LagunaToolSyntax::kCallOpen),
+      .name_prefix = "",
+      .name_suffix = "",
+      .close = std::string(LagunaToolSyntax::kCallClose),
+      // The name ends at the first argument key or the closing tag.
+      .name_delimiters = "<",
+      .tagged =
+          sampling::JsonConstraint::TaggedArguments{
+              .parameter_open = std::string(LagunaToolSyntax::kArgKeyOpen),
+              // The key ends where its close and the value's open meet.
+              .raw_value_open =
+                  std::string(LagunaToolSyntax::kArgKeyClose) +
+                  std::string(LagunaToolSyntax::kArgValueOpen),
+              .typed_value_open =
+                  std::string(LagunaToolSyntax::kArgKeyClose) +
+                  std::string(LagunaToolSyntax::kArgValueOpen),
+              .value_close = std::string(LagunaToolSyntax::kArgValueClose),
+              .parameter_separator = "",
+          },
+      .reasoning_header = true,
+  };
   ext::RegisterToolDialect({
-      .format = sampling::JsonConstraint::ToolFormat::kLaguna,
       .markers = {LagunaToolSyntax::kCallOpen},
       // Laguna names the function directly after the opener, so the opener
       // itself is the native header.
@@ -99,6 +124,8 @@ void RegisterToolDialect() {
               "</invoke>",
           },
       .scan_tool_calls = &ScanLagunaDialect,
+      .id = "laguna",
+      .syntax = kSyntax,
   });
 }
 

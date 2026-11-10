@@ -1,6 +1,6 @@
 #include "src/models/qwen/runner.hpp"
 
-#include "src/core/logging/logging.hpp"
+#include "gufo/ext/logging.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
 
@@ -26,7 +26,7 @@
 #include "gufo/ext/gguf_identity.hpp"
 #include "gufo/ext/host_budget.hpp"
 #include "gufo/ext/speculative_verifier.hpp"
-#include "src/core/hip/heap_placement.hpp"
+#include "gufo/ext/experimental/heap_placement.hpp"
 #include "src/families/qwen/config/qwen_config.hpp"
 #include "src/families/qwen/control_tokens/control_tokens.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
@@ -887,10 +887,20 @@ public:
         .sampling_defaults = QwenSamplingDefaults(model_->GetConfig()),
         // Each session owns its executor, so a yield's decodes, batched
         // ones included, share no buffer with the pass they interrupt.
+        //
+        // A pass may carry every row the executor was sized for. The chunk
+        // width was resolved against this request's own memory, and a width of
+        // zero means nothing was resolved (a dense model, or a pool too small
+        // to widen), so those keep the arena's built-in batch. Pinning the
+        // pass to the built-in batch instead would discard a resolved width of
+        // up to 16384 and take the measured prompt throughput with it.
         .scheduling =
             TextSchedulingProfile{
                 .pass_tokens = std::min<std::size_t>(
-                    max_context_, hip::QwenGpuArena::kMaxPromptBatch),
+                    max_context_,
+                    execution_policy_.prompt_chunk_rows != 0
+                        ? execution_policy_.prompt_chunk_rows
+                        : hip::QwenGpuArena::kMaxPromptBatch),
                 .max_layer_groups = kMaxPrefillLayerGroups,
                 .max_yield_decode_width = MaximumDecodeBatchWidth(),
             },

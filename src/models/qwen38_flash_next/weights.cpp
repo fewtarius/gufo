@@ -222,7 +222,16 @@ struct Binder {
           Get(p + "nextn.hnorm.weight", hc_dim, 1, 1, {GgmlType::kF32});
       l.nextn_eh_proj =
           Get(p + "nextn.eh_proj.weight", 2 * hidden, hidden, 1, dense);
-      l.nextn_head = Mixer(p + "nextn.hc_head", c, false);
+      // Some sidecars name the nextn head mixer `output_hc` at the top level
+      // rather than `nextn.hc_head` under the block. It is a distinct trained
+      // mixer either way - the shared output projection is the tensor that
+      // duplicates the main model - so bind whichever prefix this sidecar
+      // carries instead of refusing an otherwise complete head.
+      const std::string head =
+          reader.FindTensor(p + "nextn.hc_head_norm.weight") != nullptr
+              ? p + "nextn.hc_head"
+              : "output_hc";
+      l.nextn_head = Mixer(head, c, false);
     }
     return l;
   }

@@ -250,6 +250,70 @@ std::uint32_t TileCapacityFor(std::size_t slots, std::uint32_t experts) {
       experts + 1);
 }
 
+// Device scratch a session allocates beside its KV cache: every buffer Init()
+// sizes from the prefill tile and from the routed slot count. This mirrors
+// that allocation list so the budget check in Init() can compare against what
+// the session actually needs instead of a multiple of the cache, which on a
+// 112 GiB pool rejected configurations that fit with gigabytes to spare.
+std::size_t SessionScratchBytes(const Config& config, std::uint32_t tile,
+                                std::size_t q_row, std::size_t kv_row) {
+  const std::uint32_t max_heads =
+      *std::max_element(config.heads.begin(), config.heads.end());
+  const std::size_t slots =
+      static_cast<std::size_t>(tile) * config.expert_used;
+  const std::size_t t = tile;
+  const std::size_t hidden = config.hidden_size;
+
+  std::size_t f32_elems = 0;
+  f32_elems += t * hidden;                                   // x
+  f32_elems += t * hidden;                                   // xn
+  f32_elems += t * q_row;                                    // q
+  f32_elems += t * q_row;                                    // attn
+  f32_elems += t * kv_row;                                   // k
+  f32_elems += t * kv_row;                                   // v
+  f32_elems += t * max_heads;                                // gate
+  f32_elems += t * hidden;                                   // o
+  f32_elems += t * config.expert_count;                      // router
+  f32_elems += std::size_t{Session::kMaxVerifyRows} * max_heads *
+               kSplitAttnSplits * (config.head_dim + 2);      // attn_partials
+  f32_elems += slots * config.expert_ff;                      // gate_e
+  f32_elems += slots * config.expert_ff;                      // up_e
+  f32_elems += slots * hidden;                                // down_e
+  f32_elems += slots;                                         // topk
+  f32_elems += slots;                                         // expert_scale
+  f32_elems += slots;                                         // expert_const
+  f32_elems += t * config.shared_ff;                          // sh_gate
+  f32_elems += t * config.shared_ff;                          // sh_up
+  f32_elems += t * hidden;                                    // sh_out
+  f32_elems += t * config.dense_ff;                           // dense_gate
+  f32_elems += t * config.dense_ff;                           // dense_up
+  f32_elems += std::size_t{Session::kMaxVerifyRows} * hidden;  // last
+  f32_elems +=
+      std::size_t{Session::kMaxVerifyRows} * config.vocab_size;  // d_logits
+
+  std::size_t i32_elems = 0;
+  i32_elems += t;                                // tokens
+  i32_elems += slots;                            // ids
+  i32_elems += 2;                                // dense_bounds
+  i32_elems += t;                                // dense_rows
+  i32_elems += (t + 127) / 128;                  // dense_tiles
+  i32_elems += 4;                                // pos (uint32)
+  i32_elems += config.expert_count;              // counts (uint32)
+  i32_elems += kMaxExperts + 1;                  // route_bounds
+  i32_elems += kMaxExperts;                      // route_cursors
+  i32_elems += 2 * qwen38_flash_next::rocm::RoutedCompactRows(
+                       slots, config.expert_count);  // rows_token, rows_slot
+  i32_elems += 2 * TileCapacityFor(slots, config.expert_count);
+
+  const std::size_t half_elems = slots * config.expert_ff  // act_half
+                                 + t * q_row               // qh
+                                 + t * std::max(q_row, hidden)  // xh_wide
+                                 + t * hidden;                  // xh
+
+  return f32_elems * sizeof(float) + i32_elems * sizeof(std::int32_t) +
+         half_elems * sizeof(__half);
+}
+
 }  // namespace
 
 struct ModelState {
@@ -524,14 +588,20 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
     if (free_bytes != 0) {
       // The weights are already resident; the drafter's own allocations and
       // the session's scratch come out of the same pool. Require enough
-      // headroom for the KV cache plus that scratch, and refuse rather than
-      // run with a cache the device cannot back.
-      if (kv_bytes * 2 > free_bytes) {
+      // headroom for the KV cache plus that scratch - the scratch itself, not
+      // a second cache-sized copy of it - and refuse rather than run with a
+      // cache the device cannot back.
+      const std::size_t scratch_bytes =
+          SessionScratchBytes(c, tile, q_row, kv_row);
+      const std::size_t need_bytes = kv_bytes + scratch_bytes;
+      if (need_bytes > free_bytes) {
         return Fail(error_msg,
-                    "Laguna: the KV cache for a " + std::to_string(capacity) +
+                    "Laguna: a " + std::to_string(capacity) +
                         "-token context needs " +
                         std::to_string(kv_bytes / (1024 * 1024)) +
-                        " MiB but only " +
+                        " MiB of KV cache plus " +
+                        std::to_string(scratch_bytes / (1024 * 1024)) +
+                        " MiB of session scratch, but only " +
                         std::to_string(free_bytes / (1024 * 1024)) +
                         " MiB of device memory is free; use a smaller "
                         "context");

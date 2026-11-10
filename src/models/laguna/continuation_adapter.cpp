@@ -187,7 +187,7 @@ std::vector<cache::Rows> LagunaComponentAdapter::PlanPrefill(
   }
   std::vector<cache::Rows> passes;
   while (first < end) {
-    first += std::min<cache::Rows>(end - first, kPrefillPass);
+    first += std::min<cache::Rows>(end - first, PrefillPassRows());
     passes.push_back(first);
   }
   return passes;

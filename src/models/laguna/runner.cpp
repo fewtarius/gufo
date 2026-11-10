@@ -160,7 +160,25 @@ public:
 
 class LagunaTextRunner final : public HipTextModelRunner {
 public:
-  static constexpr std::size_t kPrefillChunk = 4096;
+  static constexpr std::size_t kPrefillChunk = 16384;
+
+  /// Tokens one Prefill() call hands the engine. Bounded by the engine's own
+  /// prefill tile and by how the routed expert GEMM tiles a bucket: at 4096
+  /// rows each expert gets 160 rows against a 128-row tile, so 37.5% of the
+  /// second tile is padding. LAGUNA_PREFILL_TILE raises it for the wider-pass
+  /// experiment; it must not exceed that tile.
+  [[nodiscard]] static std::size_t PrefillChunkRows() {
+    static const std::size_t value = [] {
+      if (const char* const v = std::getenv("LAGUNA_PREFILL_TILE")) {
+        const int parsed = std::atoi(v);
+        if (parsed > 0) {
+          return static_cast<std::size_t>(parsed);
+        }
+      }
+      return kPrefillChunk;
+    }();
+    return value;
+  }
   static constexpr std::size_t kWarmupTokens = 4096;
   // A device that has just released ~109 GiB of GTT needs a moment before
   // its next allocation lands correctly. Two attempts with a pause
@@ -486,7 +504,7 @@ public:
     if (offset == 0)
       laguna.drafter_stats() = {};
     const std::size_t consumed = std::min<std::size_t>(
-        {max_input_tokens, prompt.size() - offset, kPrefillChunk});
+        {max_input_tokens, prompt.size() - offset, PrefillChunkRows()});
     const auto chunk = LagunaEngineTokens(prompt.subspan(offset, consumed));
     std::string error;
     if (!laguna.session().Append(chunk, &error)) {

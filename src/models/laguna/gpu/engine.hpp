@@ -26,8 +26,13 @@ enum class KvCacheType : std::uint8_t {
 };
 
 struct EngineOptions {
-  /// Tokens one prefill pass processes.
-  std::uint32_t prefill_tile{4096};
+  /// Tokens one prefill pass processes. Sized so the routed expert GEMM fills
+  /// its tiles: 16384 rows with 10-of-256 routing gives each expert 640 rows,
+  /// exactly five 128-row tiles. At 4096 rows it was 160 rows, two tiles with
+  /// the second mostly empty, and the pass ran 7-9% slower for it.
+  /// LAGUNA_PREFILL_TILE overrides it; the runner and the cache adapter read
+  /// the same variable so a pass never exceeds this.
+  std::uint32_t prefill_tile{16384};
   /// Optional DFlash-2 drafter; its trunk taps bind to this model.
   std::string dflash_model_path;
   /// Upper bound for session contexts; bounds the drafter's context.

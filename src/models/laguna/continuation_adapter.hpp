@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <span>
 #include <vector>
@@ -67,7 +68,28 @@ public:
   [[nodiscard]] bool Invalidate(cache::Slot&) noexcept override;
 
   /// The runner consumes at most this many prompt tokens per pass.
-  static constexpr std::size_t kPrefillPass = 4096;
+  ///
+  /// This bounds one Append() call. It was 4096 while the engine's own prefill
+  /// tile was 4096; the routed expert GEMM gives each expert
+  /// `rows * experts_used / experts` rows and tiles them 128 at a time, so
+  /// the pass length decides how much of the last tile is padding. At 4096
+  /// rows and 10-of-256 routing that is 160 rows, i.e. two tiles of 128 and a
+  /// 37.5% empty second tile. Overridable with LAGUNA_PREFILL_TILE so one
+  /// build measures both arms; it must not exceed the engine's tile.
+  static constexpr std::size_t kPrefillPass = 16384;
+
+  [[nodiscard]] static std::size_t PrefillPassRows() {
+    static const std::size_t value = [] {
+      if (const char* const v = std::getenv("LAGUNA_PREFILL_TILE")) {
+        const int parsed = std::atoi(v);
+        if (parsed > 0) {
+          return static_cast<std::size_t>(parsed);
+        }
+      }
+      return kPrefillPass;
+    }();
+    return value;
+  }
   /// The live snapshot length is stored after the payload so a restore can
   /// hand the session an exact-size span while the cache buffer is fixed.
   static constexpr std::size_t kLengthTrailerBytes = sizeof(std::uint64_t);

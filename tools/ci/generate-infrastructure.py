@@ -27,7 +27,6 @@ GUIDE_LABELS = {
     "qwen-image-2.1": "Usage",
     "qwen3-asr": "Usage",
     "qwen3-tts": "Voice modes",
-    "qwen3.6-35b-a3b": "Usage and modes",
     "qwen3.8-27b": "Usage and modes",
     "qwen3.8-flash-next": "Usage and modes",
 }
@@ -194,10 +193,10 @@ def generate_check_docs(root: Path, manifests: List[Dict[str, Any]]) -> str:
             if "guide" not in entry:
                 continue
             guide_path = entry["guide"]
-            # e.g. "docs/models/deepseek-v4-flash/README.md" -> "deepseek-v4-flash"
+            # e.g. "docs/models/deepseek-v4-flash.md" -> "deepseek-v4-flash"
             parts = Path(guide_path).parts
-            if len(parts) >= 3 and parts[0] == "docs" and parts[1] == "models":
-                model_dirs.add(parts[2])
+            if len(parts) == 3 and parts[0] == "docs" and parts[1] == "models":
+                model_dirs.add(Path(parts[2]).stem)
 
     sorted_dirs = sorted(model_dirs)
     dir_strings = [f'"{d}"' for d in sorted_dirs]
@@ -210,10 +209,12 @@ def generate_check_docs(root: Path, manifests: List[Dict[str, Any]]) -> str:
     tuple_content = ",\n                    ".join(lines)
     if len(dir_strings) == 1:
         tuple_content += ","
+    models = f"({tuple_content})"
     block = (
-        '    *[f"docs/models/{model}/{document}.md"\n'
-        + f"      for model in ({tuple_content})\n"
-        + '      for document in ("README", "BENCHMARKS", "QUALITY", "EXPERIMENTS")],'
+        f'    *[f"docs/models/{{model}}.md"\n      for model in {models}],\n'
+        + '    *[f"docs/internal/models/{model}/{document}.md"\n'
+        + f"      for model in {models}\n"
+        + '      for document in ("BENCHMARKS", "QUALITY", "EXPERIMENTS")],'
     )
 
     return replace_marked_block(
@@ -233,17 +234,14 @@ def generate_models_readme(root: Path, manifests: List[Dict[str, Any]]) -> str:
     rows.append("| Model | Weights / supported inputs | Guide |")
     rows.append("| --- | --- | --- |")
 
-    # Order by model name or title. One extension can present more than one
-    # model, so the docs block is either an entry or a list of entries.
+    # Order by model name or title
     model_docs = []
     for manifest in manifests:
         docs = manifest.get("docs")
         if not docs:
             continue
-        if isinstance(docs, list):
-            model_docs.extend(docs)
-        else:
-            model_docs.append(docs)
+        entries = docs if isinstance(docs, list) else [docs]
+        model_docs.extend(entries)
 
     model_docs.sort(key=lambda d: d.get("title", ""))
 
@@ -252,9 +250,9 @@ def generate_models_readme(root: Path, manifests: List[Dict[str, Any]]) -> str:
         inputs = docs["inputs"]
         guide = docs["guide"]
         parts = Path(guide).parts
-        if len(parts) >= 3 and parts[0] == "docs" and parts[1] == "models":
-            slug = parts[2]
-            rel_guide = f"{slug}/{parts[3]}" if len(parts) > 3 else f"{slug}/README.md"
+        if len(parts) == 3 and parts[0] == "docs" and parts[1] == "models":
+            slug = Path(parts[2]).stem
+            rel_guide = parts[2]
         else:
             slug = Path(guide).stem
             rel_guide = guide

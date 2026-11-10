@@ -19,8 +19,6 @@
 namespace gufo::hip {
 namespace {
 
-constexpr std::uint32_t kMaxPromptBatch = 4096;
-
 /// The batch rows a model family can use in one pass.
 ///
 /// A mixture-of-experts feed-forward runs its router per token and takes one
@@ -30,7 +28,8 @@ constexpr std::uint32_t kMaxPromptBatch = 4096;
 [[nodiscard]] std::uint32_t PromptBatchRows(const core::ModelConfig& config,
                                             std::uint32_t context,
                                             std::uint32_t moe_rows) noexcept {
-  return std::min(context, config.IsMoe() ? moe_rows : kMaxPromptBatch);
+  return std::min(context, config.IsMoe() ? moe_rows
+                                          : QwenGpuArena::kMaxPromptBatch);
 }
 
 /// The expert scratch's row count for a policy. Zero in the policy means the
@@ -45,6 +44,7 @@ constexpr std::uint32_t kMaxPromptBatch = 4096;
   return policy.prompt_chunk_rows != 0 ? policy.prompt_chunk_rows
                                        : QwenGpuArena::kMoeScratchRows;
 }
+
 constexpr std::size_t kMaxTargetLayerTaps = 5;
 constexpr std::array<std::uint8_t, 8> kCompactSnapshotMagic = {
     'G', 'Q', 'K', 'V', 'S', 'N', 'P', '1'};

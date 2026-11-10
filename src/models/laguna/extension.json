@@ -74,7 +74,7 @@
   "docs": {
     "title": "Laguna S 2.1",
     "inputs": "Sharded Q4_K_XL GGUF; text",
-    "guide": "docs/models/laguna/README.md"
+    "guide": "docs/models/laguna.md"
   },
   "tests": [
     {

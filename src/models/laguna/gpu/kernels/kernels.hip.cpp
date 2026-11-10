@@ -932,7 +932,7 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
                                : (partner_pair | (own_pair << 16));
   }
 
-  float run_max = -3.0e38F;
+  float run_max = kNegInf;
   // The sink counts once; the two lane halves each sum their own keys.
   float run_sum = 0.0F;
   v8f o_acc[8];
@@ -1232,7 +1232,7 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
     }
 
     float val[kNb][8];
-    float tile_max = -3.0e38F;
+    float tile_max = kNegInf;
 #pragma unroll
     for (int nb = 0; nb < kNb; ++nb) {
 #pragma unroll
@@ -1241,13 +1241,21 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
         const bool in_window =
             window == 0 || qpos < window || key + window > qpos;
         const bool valid = live && key <= qpos && in_window;
-        val[nb][i] = valid ? s_acc[nb][i] * scale : -3.0e38F;
+        val[nb][i] = valid ? s_acc[nb][i] * scale : kNegInf;
         tile_max = fmaxf(tile_max, val[nb][i]);
       }
     }
     tile_max = fmaxf(tile_max, __shfl_xor(tile_max, 16));
     const float m_new = fmaxf(run_max, tile_max);
-    const float alpha = __builtin_amdgcn_exp2f(run_max - m_new);
+    // A tile whose keys all fall outside the window or past the query leaves
+    // every val at kNegInf. run_max is the same sentinel until the first real
+    // key, and exp2(kNegInf - kNegInf) is exp2(0) = 1, so that tile would
+    // enter the sum with weight one and a full row of V. It is a phantom
+    // contribution of up to one key per block, and it only stays invisible
+    // because the real weights are large. Guard both the rescale and each
+    // key weight on having a finite score.
+    const float alpha =
+        run_max > kNegInf ? __builtin_amdgcn_exp2f(run_max - m_new) : 1.0F;
     float psum = 0.0F;
     v16h p_frag[kNb];
 #pragma unroll
@@ -1255,8 +1263,12 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
       std::uint32_t own[4];
 #pragma unroll
       for (int m = 0; m < 4; ++m) {
-        const float p0 = __builtin_amdgcn_exp2f(val[nb][2 * m] - m_new);
-        const float p1 = __builtin_amdgcn_exp2f(val[nb][2 * m + 1] - m_new);
+        const float p0 = val[nb][2 * m] > kNegInf
+                             ? __builtin_amdgcn_exp2f(val[nb][2 * m] - m_new)
+                             : 0.0F;
+        const float p1 = val[nb][2 * m + 1] > kNegInf
+                             ? __builtin_amdgcn_exp2f(val[nb][2 * m + 1] - m_new)
+                             : 0.0F;
         psum += p0 + p1;
         const __half2 h2 = __floats2half2_rn(p0, p1);
         own[m] = *reinterpret_cast<const std::uint32_t*>(&h2);

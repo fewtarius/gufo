@@ -4,7 +4,9 @@
 path is unchanged.** These are execution-consistency checks; original-target
 and GGUF-conversion parity remain unqualified.
 
-[Model identities and dated evidence](artifacts/model-identities.json)
+[Model identities and dated evidence](../../models/qwen3.8-27b/artifacts/model-identities.json)
+covers the shared family artifacts; this model has no separate identity
+capture.
 
 | Check | Result |
 | --- | --- |
@@ -15,7 +17,7 @@ and GGUF-conversion parity remain unqualified.
 | Greedy completion, F16 against q8_0, same request | Identical text |
 
 The first three are checked by
-[the K/V storage test](../../../tests/models/qwen/hip/attention/kv_storage_ops_test.cpp)
+[the K/V storage test](../../../../tests/models/qwen/hip/attention/kv_storage_ops_test.cpp)
 and run on every build. The fourth is the existing FP16 coverage, which the
 q8_0 work did not touch. The fifth is a single-request control, not a
 sweep.

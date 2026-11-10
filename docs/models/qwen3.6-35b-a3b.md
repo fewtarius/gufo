@@ -4,7 +4,7 @@ A hybrid mixture-of-experts text model on gfx1103 and gfx1151. Production
 target is **UD-Q4_K_XL** (21.3 GiB weights); a draft model and a projector
 need additional memory.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [q8_0 K/V cache](../qwen3.8-27b/KV-Q8.md)
+[Benchmarks](../internal/models/qwen3.6-35b-a3b/BENCHMARKS.md) · [Quality](../internal/models/qwen3.6-35b-a3b/QUALITY.md) · [q8_0 K/V cache](../internal/models/qwen3.8-27b/KV-Q8.md)
 
 ## Load and run
 
@@ -37,7 +37,7 @@ grows with the context:
 
 At a 131072-token context the F16 cache does not fit in the 1.9 GiB of
 device memory the weights leave behind. The q8_0 cache does, and the
-context loads. See the [q8_0 K/V cache](../qwen3.8-27b/KV-Q8.md) for the
+context loads. See the [q8_0 K/V cache](../internal/models/qwen3.8-27b/KV-Q8.md) for the
 format and its cost.
 
 ```sh
@@ -54,4 +54,4 @@ cache.
 None. The DFlash2 drafter is accepted by this runner, but no DFlash2
 drafter for this model is available on the measurement host, and the
 model's own MTP head is not served by this runner. The
-[Benchmarks](BENCHMARKS.md) are plain decode.
+[Benchmarks](../internal/models/qwen3.6-35b-a3b/BENCHMARKS.md) are plain decode.

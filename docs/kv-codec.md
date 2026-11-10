@@ -17,9 +17,10 @@ document covers the *packed* row formats: `q8_0` and `q4_0`.
 ## Why a codec at all
 
 Attention K/V grows linearly with context and is read on every decode step.
-On the Nimo Axis N161 a Laguna S 2.1 conversation at 106k tokens retains
-10.6 GB of ordinary K/V - about 99 KB per token. At the model's 262144-token
-context that is roughly 26 GB.
+On a **Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S
+`gfx1151`, 124.9 GiB RAM visible, 112.5 GiB GPU-visible) a Laguna S 2.1
+conversation at 106k tokens retains 10.6 GB of ordinary K/V - about 99 KB per
+token. At the model's 262144-token context that is roughly 26 GB.
 
 `q8_0` stores an ordinary K/V row in 53.125% of the F16 bytes. That is a
 memory trade, not a speed one: the codec adds work on write and on read, and
@@ -241,5 +242,5 @@ Both Gufo and Gufetto are MIT licensed and carry the same
 
 ## See also
 
-- [KV-CACHE.md](KV-CACHE.md) - cross-request cache reuse and the ContinuationCache
+- [internal/cache.md](internal/cache.md) - cross-request cache reuse and the ContinuationCache
 - [models/](models) - per-model documentation and measurements

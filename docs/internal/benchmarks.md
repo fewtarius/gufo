@@ -4,6 +4,9 @@ How benchmark numbers are produced, compared and retained. The public summary
 is [benchmarks](../benchmarks.md). Measure release binaries (`nix build`, then
 `result/bin`). Per-model results and qualification gaps live in:
 
+- [Laguna S 2.1](models/laguna/BENCHMARKS.md)
+- [Qwen3.6-35B-A3B](models/qwen3.6-35b-a3b/BENCHMARKS.md)
+
 - [DeepSeek V4 Flash](models/deepseek-v4-flash/BENCHMARKS.md)
 - [EmbeddingGemma 2](models/embeddinggemma-2/BENCHMARKS.md)
 - [MiniMax H3](models/minimax-h3/BENCHMARKS.md)
@@ -12,6 +15,67 @@ is [benchmarks](../benchmarks.md). Measure release binaries (`nix build`, then
 - [Qwen3.8 Flash-Next](models/qwen3.8-flash-next/BENCHMARKS.md)
 - [Qwen3-ASR](models/qwen3-asr/BENCHMARKS.md)
 - [Qwen3-TTS](models/qwen3-tts/BENCHMARKS.md)
+
+## Coverage by device
+
+Which models have measured results on which device. "Does not fit" means the
+weights alone exceed the device's GPU-visible pool, so no context makes it
+usable there. A device is named by its product and APU, so a result can be
+matched to hardware without knowing which machine it ran on.
+
+| | Nimo Axis N161 | AYANEO FLIP KB |
+| --- | --- | --- |
+| APU | Ryzen AI Max+ 395 | Ryzen 7 7840U |
+| GPU | Radeon 8060S, `gfx1151`, 40 CUs | Radeon 780M, `gfx1103`, 8 CUs |
+| RAM visible to the OS | 124.9 GiB | 25.2 GiB |
+| GPU-visible pool | 112.5 GiB (512 MiB carveout + 112 GiB GTT) | 26 GiB (6 GiB carveout + 20 GiB GTT) |
+
+| Model | Nimo Axis N161 | AYANEO FLIP KB |
+| --- | --- | --- |
+| Laguna S 2.1 UD-Q4_K_XL (68.35 GiB) | measured, 128k | does not fit |
+| Laguna S 2.1 UD-Q5_K_XL (82.02 GiB) | measured, 128k F16 / native 262k q8_0 | does not fit |
+| Qwen3.6-35B-A3B UD-Q4_K_XL (21.28 GiB) | measured, 128k | measured, 128k q8_0 |
+| Qwen3.8-27B UD-Q4_K_XL (16.35 GiB) | measured, up to 131k | spills to host, 3.8 tok/s |
+| Qwen3.8-Flash-Next UD-Q4_K_XL (103.7 GiB) | measured, AR and MTP | does not fit |
+| DeepSeek V4 Flash, MiniMax H3, Qwen-Image-2.1, EmbeddingGemma 2, Qwen3-ASR, Qwen3-TTS | see each model page | not run |
+
+Peak device memory at the tested context, for the rows above:
+
+| Model | Device | Context | K/V | Peak device | Pool |
+| --- | --- | ---: | --- | ---: | ---: |
+| Laguna S 2.1 Q4 | Nimo Axis N161 | 131,072 | F16 | 90,446 MiB | 115,200 MiB |
+| Laguna S 2.1 Q4 | Nimo Axis N161 | 131,072 | q8_0 | 83,563 MiB | 115,200 MiB |
+| Laguna S 2.1 Q5 | Nimo Axis N161 | 131,072 | F16 | 109,963 MiB | 115,200 MiB |
+| Laguna S 2.1 Q5 | Nimo Axis N161 | 262,144 | q8_0 | 109,195 MiB | 115,200 MiB |
+| Qwen3.6-35B-A3B | Nimo Axis N161 | 131,072 | F16 | 29,928 MiB | 115,200 MiB |
+| Qwen3.6-35B-A3B | Nimo Axis N161 | 131,072 | q8_0 | 28,728 MiB | 115,200 MiB |
+| Qwen3.6-35B-A3B | AYANEO FLIP KB | 131,072 | q8_0 | 26,351 MiB | 26,624 MiB |
+| Qwen3.8-Flash-Next | Nimo Axis N161 | 133,121 | F16 | 84,774 MiB AR / 88,931 MiB MTP | 115,200 MiB |
+
+Two rows are at the edge. Laguna Q5 with q8_0 fills 95% of the Nimo pool at
+native context, which is why the cache format is what makes that context
+reachable. Qwen3.6 on the FLIP KB uses 99% of the pool at 128k, so any larger
+context needs the format change, not a tuning change.
+
+Both machines are unified-memory parts, so "device memory" and "system RAM" are
+the same DRAM reached two ways. The kernel's GTT window is the pool a loader
+sees and what `mem_info_gtt_total` reports; the BIOS carveout is a separate,
+small reservation. A model larger than the whole pool can be admitted and then
+read unbacked pages, which surfaces as non-finite logits rather than an
+allocation error - which is why the loaders carry budget checks.
+
+## Between-run settling
+
+Loading a model that occupies most of the pool, then immediately loading
+another, can produce non-finite logits on the first forward even when the second
+configuration fits. The kernel needs roughly a minute to reclaim the previous
+process's pages. Measured repeatedly on the Nimo Axis N161: a run that failed
+this way passed unchanged after a wait.
+
+Allow about 75 seconds between back-to-back large loads, and treat a
+first-forward NaN right after a previous server exited as a device state, not a
+result, until it reproduces after the wait.
+
 
 ## Model benchmark driver
 

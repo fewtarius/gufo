@@ -59,7 +59,8 @@ temperature and accepts a draft with probability `P_target(draft)`,
 resampling from the residual on a miss. That rule is unbiased - for a draft
 from the drafter's distribution q and the target's p, the published token z
 lands with probability `q(z)p(z) + p(z)(1 - q(z)) = p(z)` - and it is the
-same rule the prompt CLI uses. Measured on the Nimo Axis N161 at 141,170
+same rule the prompt CLI uses. Measured on a Nimo Axis N161 (Strix Halo,
+Ryzen AI Max+ 395, Radeon 8060S, 124.9 GiB RAM visible) at 141,170
 tokens with `temperature=0.7`: 16.1 tok/s with 40% of drafts accepted,
 against 14.4 tok/s plain.
 
@@ -78,7 +79,7 @@ trips per layer per bank (9 Q-slices + 1 K + 1 V, x2 for the hi/lo residual
 pass), more than the available hide window absorbs. Left off by default
 (`LAGUNA_NPU_QKV=1` opts in, not recommended). Full investigation, every
 dead end, and the exact numbers behind each of the above:
-[laguna-port-state.md](../../../src/models/laguna/laguna-port-state.md)
+[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md)
 (a historical record of the port process).
 
 Decode flattened substantially at depth this port (split-K decode attention,
@@ -111,7 +112,7 @@ Verified stacking cleanly with the NPU and two-bank pipeline (995.7 tok/s
 at 61,108 tokens, all three on, no corruption) and across a 2,600-token
 generation past the decode HIP-graph capture boundary (a real, separate
 bug found and fixed this port - see
-[laguna-port-state.md](../../../src/models/laguna/laguna-port-state.md)
+[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md)
 (a historical record of the port process)
 for the full account, including three real selection bugs found when
 this was first turned on). Off by default; `LAGUNA_SPARSE_TOPK=N`
@@ -129,7 +130,7 @@ overrides the 256-block budget.
 | `LAGUNA_PREFILL_TILE=N` | Prefill chunk size (default 4,096); needs a matching NPU instruction
 file if `GUFO_NPU_DIR` is set and N != 4,096 |
 | `LAGUNA_KV_CACHE_TYPE=q8_0` | Store the attention K/V cache as q8_0 instead of F16 - 53.125% of
-the bytes, lossy. See [KV-Q8.md](KV-Q8.md) |
+the bytes, lossy. See [internal/models/laguna/KV-Q8.md](../internal/models/laguna/KV-Q8.md) |
 
 ## Numerical notes
 

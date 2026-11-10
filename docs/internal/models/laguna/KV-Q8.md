@@ -6,7 +6,8 @@
 instead of F16. One binary16 scale and 32 signed codes per 32 elements: 34
 bytes where F16 used 64. A row keeps **53.125%** of its F16 bytes.
 
-The format and the numeric contract are in [../kv-codec.md](../../kv-codec.md).
+The format and the numeric contract are in
+[../../../kv-codec.md](../../../kv-codec.md).
 The codec itself is model-agnostic and lives in `src/core/kv_codec/`; this
 page is about the Laguna side of it.
 
@@ -41,8 +42,9 @@ host codec byte for byte in `tests/models/laguna/kv_q8_test.cpp`.
 
 ## Measured
 
-Nimo Axis N161 (gfx1151), Laguna S 2.1 UD-Q4_K_XL, 56494-token prompt,
-block-sparse attention on, greedy.
+**Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`,
+124.9 GiB RAM visible, 112.5 GiB GPU-visible). Laguna S 2.1 UD-Q4_K_XL,
+56494-token prompt, block-sparse attention on, greedy.
 
 | | device memory | prefill tok/s | plain decode tok/s |
 | --- | --- | --- | --- |
@@ -53,6 +55,20 @@ block-sparse attention on, greedy.
 
 The F16 path is unchanged: a greedy request produces byte-identical output
 before and after this change.
+
+### The case the format exists for
+
+UD-Q5_K_XL at the model's native 262144-token context. F16 cannot get there at
+all on this device:
+
+| | context | device memory | outcome |
+| --- | ---: | ---: | --- |
+| F16 | 262,144 | needs 16,968 MiB KV + 7,971 MiB scratch | refused, 21,376 MiB free |
+| q8_0 | 262,144 | 109,195 MiB | loads and runs |
+
+The same model therefore has no F16 row at native context. A paired sweep
+(UD-Q5_K_XL F16 at 131072 against q8_0 at 262144) is in
+[BENCHMARKS.md](BENCHMARKS.md#ud-q5_k_xl).
 
 ### The drafter is the real cost
 
@@ -94,7 +110,7 @@ is almost entirely the 12 full-attention layers.
 
 ## See also
 
-- [../kv-codec.md](../../kv-codec.md) - the codec contract and the numeric rules
-- [../KV-CACHE.md](../../KV-CACHE.md) - cross-request cache reuse
+- [../../../kv-codec.md](../../../kv-codec.md) - the codec contract and the numeric rules
+- [cache.md](../../cache.md) - cross-request cache reuse
 - [EXPERIMENTS.md](EXPERIMENTS.md) - the retained decisions behind this
   model, including the ones the q8_0 cache was chosen against

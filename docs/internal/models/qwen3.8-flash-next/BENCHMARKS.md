@@ -1,10 +1,36 @@
 # Qwen3.8 Flash-Next benchmarks
 
-AMD Strix Halo `gfx1151`, 128 GB unified memory. Unsloth `UD-Q4_K_XL` target
+**Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`,
+124.9 GiB RAM visible, 112.5 GiB GPU-visible). Unsloth `UD-Q4_K_XL` target
 with shared-Q8_0 MTP; adaptive drafting. HTTP, greedy, thinking off.
 Gufo `fec4759d` (October 18, 2026); llama.cpp `b11069` AR and `6fcaa16f` MTP
 (September 22–23). Positive gain favors Gufo.
 [Quality and measurement details](QUALITY.md#benchmark-method) · [Model identities](artifacts/model-identities.json)
+## MTP on the UD 3.1 weights, November 10, 2026
+
+The MTP table below was measured before `b2e132b5` moved the model to the
+Unsloth Dynamic 3.1 weights. The shipped sidecar
+(`mtp-Qwen3.8-Flash-Next-Q8_0.gguf`) names the nextn block's
+hyper-connection head mixer `output_hc_*` at the top level, while the loader
+bound only `nextn.hc_head_*`, so MTP stopped loading on the new weights.
+
+The head is a distinct trained mixer under either name: `output.weight` and
+`token_embd.weight` in the sidecar match the main model byte for byte, while its
+`output_hc_*` differs from the model's own head mixer. The loader now binds
+whichever prefix the sidecar carries, and the drafter validator accepts both.
+
+`gufo bench -p 1024 -n 64`, UD-Q4_K_XL with the shared Q8_0 sidecar:
+
+| | pp tok/s | tg tok/s |
+| --- | ---: | ---: |
+| without MTP | 1,648.7 | 25.17 |
+| with MTP | 1,601.0 | 44.96 |
+
+**+78.6% decode for 3% of prefill.** This is a short-prompt control, not a
+replacement for the `pp2048`/`tg128` tables: those retain their October dates and
+were measured on the previous weights, so they do not qualify MTP on the current
+artifact. Re-running the full single-user MTP sweep on UD 3.1 is open work.
+
 
 ## PR #877 controls, November 4, 2026
 

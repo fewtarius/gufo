@@ -1,6 +1,7 @@
 # Qwen27B benchmarks
 
-AMD Strix Halo `gfx1151`, 128 GB unified memory. Gufo versus llama.cpp
+**Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`,
+124.9 GiB RAM visible, 112.5 GiB GPU-visible). Gufo versus llama.cpp
 `b11069`, using the same Q4_K_XL / Q8_K_XL targets and Q4_K_M DFlash2 draft.
 Gufo uses its adaptive controller. HTTP, greedy, thinking off.
 
@@ -279,3 +280,31 @@ peaks at 39.14 GiB in both rows.
 <!-- /bench -->
 
 ![Memory occupation](artifacts/charts/memory-q8.svg)
+
+## Radeon 780M - the same model on a handheld
+
+An **AYANEO FLIP KB** (Ryzen 7 7840U, Radeon 780M `gfx1103`, 25.2 GiB RAM
+visible, 26 GiB GPU-visible). Every table above is the Nimo Axis N161; this is
+the only handheld measurement.
+
+Qwen3.8-27B UD-Q4_K_XL, context 32768, q8_0 K/V, one session, temperature 0,
+64 generated tokens per row, prompt cache a miss.
+
+| Prompt tokens | Prefill tok/s | Decode tok/s |
+| ---: | ---: | ---: |
+| 6,080 | 113.6 | 3.8 |
+| 18,217 | 107.6 | 3.6 |
+
+The model does not fit this device and the numbers say so. Its 16.35 GiB of
+weights sit in a 20,480 MiB pool, so it loads by falling back to host memory:
+`gpu_device_used_mib=17214`, `host_available_mib=4015`, RSS 17,114 MiB.
+
+Decode at 3.8 tok/s is below usable. A 35.5B MoE with ~3B active decodes about
+6x faster on the same device than this 27.3B dense model, because decode cost
+tracks active parameters and the dense model additionally spills. See
+[qwen3.6-35b-a3b](../qwen3.6-35b-a3b/BENCHMARKS.md), which is the model this
+device can actually carry.
+
+This is a spill figure, not a characterization of the model on adequate
+hardware. The Nimo tables above are that.
+

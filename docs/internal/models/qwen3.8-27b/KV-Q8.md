@@ -7,7 +7,7 @@ instead of F16. One binary16 scale and 32 signed codes per 32 elements: 34
 bytes where F16 used 64. A row keeps **53.125%** of its F16 bytes.
 
 The format and the numeric contract are in
-[../../kv-codec.md](../../kv-codec.md). The codec itself is model-agnostic
+[../../../kv-codec.md](../../../kv-codec.md). The codec itself is model-agnostic
 and lives in `src/core/kv_codec/`; this page is about the Qwen side of
 it.
 
@@ -72,8 +72,9 @@ dequantized values exactly. Both are checked in
 
 ## Measured
 
-Ayaneo Flip KB (780M, gfx1103), 24.6 GiB of RAM, 6 GiB of firmware VRAM
-and a 26 GiB GTT window. Qwen3.6-35B-A3B UD-Q4_K_XL, one session,
+**AYANEO FLIP KB** (Ryzen 7 7840U, Radeon 780M `gfx1103`, 25.2 GiB RAM
+visible, 26 GiB GPU-visible: a 6 GiB firmware carveout plus a 20 GiB GTT
+window). Qwen3.6-35B-A3B UD-Q4_K_XL, one session,
 greedy, 128 new tokens.
 
 | context | format | device used | decode tok/s | prompt tok/s |
@@ -124,7 +125,7 @@ at 32768 and 1200 MiB at 131072.
 
 ## See also
 
-- [../../kv-codec.md](../../kv-codec.md) - the codec contract and the numeric rules
-- [../../KV-CACHE.md](../../KV-CACHE.md) - cross-request cache reuse
+- [../../../kv-codec.md](../../../kv-codec.md) - the codec contract and the numeric rules
+- [cache.md](../../cache.md) - cross-request cache reuse
 - [../laguna/KV-Q8.md](../laguna/KV-Q8.md) - the same codec on the Laguna
   model, where the drafter makes the loss visible

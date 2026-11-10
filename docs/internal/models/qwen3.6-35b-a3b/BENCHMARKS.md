@@ -1,7 +1,8 @@
 # Qwen35B-A3B benchmarks
 
-AMD Radeon 780M (gfx1103), 25.8 GiB of usable system memory, 6 GiB of firmware
-VRAM and a 20 GiB GTT window. Qwen3.6-35B-A3B UD-Q4_K_XL, one session, greedy.
+**AYANEO FLIP KB** (Ryzen 7 7840U, Radeon 780M `gfx1103`, 25.2 GiB RAM
+visible, 26 GiB GPU-visible: a 6 GiB firmware carveout plus a 20 GiB GTT
+window). Qwen3.6-35B-A3B UD-Q4_K_XL, one session, greedy.
 
 ## Method
 
@@ -18,6 +19,36 @@ K/V. Both engines were measured sequentially because the model does not fit
 twice; that forces one of them to run hotter. llama.cpp's own rate fell from
 400 to 316 tok/s across three identical 4804-token prompts in one run, so a few
 percent either way is thermal, not a difference between engines.
+
+## Strix Halo - the same model, F16 against q8_0
+
+A **Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`,
+124.9 GiB RAM visible, 112.5 GiB GPU-visible). Every other table on this page
+is the AYANEO FLIP KB.
+
+Context 131072, `gufo serve llm --sessions 1`, temperature 0, 64 generated
+tokens, one fresh request per row, prompt cache a miss. Two separate runs, so
+the prompt token counts differ slightly.
+
+| Prompt F16 / q8_0 | pp F16 | pp q8_0 | tg F16 | tg q8_0 |
+| --- | ---: | ---: | ---: | ---: |
+| 6,009 / 6,079 | 1,786.3 | 1,791.9 | 41.6 | 41.7 |
+| 23,986 / 24,265 | 1,690.0 | 1,696.9 | 36.6 | 35.9 |
+| 47,961 / 48,519 | 1,318.9 | 1,301.5 | 31.3 | 30.2 |
+| 71,937 / 72,774 | 1,070.3 | 906.0 | 28.0 | 26.2 |
+
+Device at load: F16 29,928 MiB, q8_0 28,728 MiB.
+
+Decode is within 3.5% through 48k, matching the FLIP KB finding that the format is a
+memory trade rather than a speed one: a decode step reads the weights, not the
+cache. The 72k prefill row is 15.4% slower on q8_0 after being 1.3% slower at
+48k, with TTFT 80,325 ms against 67,215 ms. A 14x jump in the gap across one
+step is not a smooth dequant cost, so that row needs a repeat before it is
+trusted.
+
+On this device the cache format buys nothing at 131072 - 1,200 MiB against a
+112.5 GiB pool. It matters on the FLIP KB, where the same 1,200 MiB is the difference
+between loading and not.
 
 ## Prefill
 

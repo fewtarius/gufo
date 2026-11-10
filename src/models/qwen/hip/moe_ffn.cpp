@@ -8,10 +8,10 @@
 #include <stdexcept>
 
 #include "src/core/hip/hip_utils.hpp"
+#include "src/core/hip/profile.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/families/qwen/kernels/ops/moe.hpp"
 #include "src/families/qwen/kernels/ops/swiglu.hpp"
-#include "src/core/hip/profile.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace gufo::hip {

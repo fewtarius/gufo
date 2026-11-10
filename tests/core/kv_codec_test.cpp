@@ -128,7 +128,7 @@ void TestRoundingPrimitive() {
 
   ExpectThrows(
       [] {
-        gufo::core::kv_codec::RoundQ8Code(
+        (void)gufo::core::kv_codec::RoundQ8Code(
             std::numeric_limits<float>::infinity());
       },
       "q8 code rejects a non-finite scaled value");
@@ -143,11 +143,11 @@ void TestGeometry() {
   Expect(RowSize(64, RowCodec::kQ8_0) == 68, "q8_0 row bytes");
   Expect(RowSize(64, RowCodec::kQ4_0) == 36, "q4_0 row bytes");
 
-  ExpectThrows([] { RowBytes(30, RowCodec::kQ8_0); },
+  ExpectThrows([] { (void)RowBytes(30, RowCodec::kQ8_0); },
                "q8_0 rejects a partial block");
-  ExpectThrows([] { RowBytes(30, RowCodec::kQ4_0); },
+  ExpectThrows([] { (void)RowBytes(30, RowCodec::kQ4_0); },
                "q4_0 rejects a partial block");
-  ExpectThrows([] { RowBytes(64, static_cast<RowCodec>(9)); },
+  ExpectThrows([] { (void)RowBytes(64, static_cast<RowCodec>(9)); },
                "an unknown codec is rejected");
 }
 

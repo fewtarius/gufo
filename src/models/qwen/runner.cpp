@@ -688,9 +688,8 @@ public:
         // Below 1024 the matrix-core attention prefix does not engage, so the
         // direct kernel computes attention. That path is verified at these
         // widths, and a narrower chunk only costs prefill throughput.
-        constexpr std::uint32_t kCandidates[] = {16384, 8192, 4096, 3072,
-                                                 2048,  1536, 1024, 768,
-                                                 512};
+        constexpr std::uint32_t kCandidates[] = {16384, 8192, 4096, 3072, 2048,
+                                                 1536,  1024, 768,  512};
         const auto needed_at = [&](std::uint32_t rows) {
           auto probe = policy;
           probe.prompt_chunk_rows = rows;

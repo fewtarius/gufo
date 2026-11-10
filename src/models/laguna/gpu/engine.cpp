@@ -607,9 +607,9 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
        dense_rows.Allocate(tile) &&
        dense_tiles.Allocate((std::size_t{tile} + 127) / 128) &&
        dense_bounds.Allocate(2) &&
-       xh_wide.Allocate(std::size_t{tile} *
-                        (xh_wide_k = std::max(q_row,
-                                              std::size_t{c.hidden_size}))) &&
+       xh_wide.Allocate(
+           std::size_t{tile} *
+           (xh_wide_k = std::max(q_row, std::size_t{c.hidden_size}))) &&
        last.Allocate(std::size_t{kMaxVerifyRows} * c.hidden_size) &&
        d_logits.Allocate(std::size_t{kMaxVerifyRows} * c.vocab_size);
   ok = ok &&
@@ -647,15 +647,14 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
       dtiles[j] = static_cast<std::int32_t>(j << 16);
     }
     const std::int32_t bounds[2] = {0, static_cast<std::int32_t>(tile)};
-    dense_ready =
-        hipMemcpy(dense_rows.get(), rows.data(),
-                  rows.size() * sizeof(std::int32_t), hipMemcpyHostToDevice) ==
-            hipSuccess &&
-        hipMemcpy(dense_tiles.get(), dtiles.data(),
-                  dtiles.size() * sizeof(std::int32_t),
-                  hipMemcpyHostToDevice) == hipSuccess &&
-        hipMemcpy(dense_bounds.get(), bounds, sizeof(bounds),
-                  hipMemcpyHostToDevice) == hipSuccess;
+    dense_ready = hipMemcpy(dense_rows.get(), rows.data(),
+                            rows.size() * sizeof(std::int32_t),
+                            hipMemcpyHostToDevice) == hipSuccess &&
+                  hipMemcpy(dense_tiles.get(), dtiles.data(),
+                            dtiles.size() * sizeof(std::int32_t),
+                            hipMemcpyHostToDevice) == hipSuccess &&
+                  hipMemcpy(dense_bounds.get(), bounds, sizeof(bounds),
+                            hipMemcpyHostToDevice) == hipSuccess;
   }
   std::fill(h_logits, h_logits + std::size_t{kMaxVerifyRows} * c.vocab_size,
             0.0F);
@@ -764,8 +763,8 @@ bool Session::Impl::Dense(const DeviceTensor& w, const float* in, float* out,
           qwen38_flash_next::rocm::RoutedF16GemmQ8Wide(
               w.data, xh_wide.get(), dense_tiles.get(),
               static_cast<std::uint32_t>((n + 127) / 128), dense_bounds.get(),
-              dense_rows.get(), dense_rows.get(), nullptr, out, nullptr,
-              w.rows, w.cols, stream)) {
+              dense_rows.get(), dense_rows.get(), nullptr, out, nullptr, w.rows,
+              w.cols, stream)) {
         return true;
       }
     }
@@ -833,7 +832,8 @@ bool Session::Impl::Attention(std::uint32_t il, std::uint32_t n,
   }
   rocm::Q8Rows(L.attn_gate.data, cxn, gate.get(), n, L.attn_gate.rows,
                L.attn_gate.cols, stream);
-  if (layer_clock != nullptr) layer_clock->Mark();
+  if (layer_clock != nullptr)
+    layer_clock->Mark();
   rocm::RmsNormRows(q.get(), static_cast<const float*>(L.attn_q_norm.data),
                     q.get(), n, heads * c.head_dim, heads, c.rms_eps, stream);
   rocm::RmsNormRows(k.get(), static_cast<const float*>(L.attn_k_norm.data),
@@ -842,7 +842,8 @@ bool Session::Impl::Attention(std::uint32_t il, std::uint32_t n,
                   rope.mscale, pos.get(), stream);
   rocm::RopeTable(k.get(), n, c.num_kv, c.head_dim, rope.n_dims, rope.inv_freq,
                   rope.mscale, pos.get(), stream);
-  if (layer_clock != nullptr) layer_clock->Mark();
+  if (layer_clock != nullptr)
+    layer_clock->Mark();
   if (kv_cache_type == KvCacheType::kQ8_0) {
     rocm::StoreKvQ8(k.get(), v.get(), k_cache[il].get(), v_cache[il].get(), n,
                     kv_row, pos.get(), ring[il], stream);
@@ -852,7 +853,8 @@ bool Session::Impl::Attention(std::uint32_t il, std::uint32_t n,
                   reinterpret_cast<__half*>(v_cache[il].get()), n, kv_row,
                   pos.get(), ring[il], stream);
   }
-  if (layer_clock != nullptr) layer_clock->Mark();
+  if (layer_clock != nullptr)
+    layer_clock->Mark();
   // Block-sparse attention's pooled-key maintenance is the CALLER's job
   // (Forward()'s live post-pass), never Attention()'s own - a decode/verify
   // HIP
@@ -903,7 +905,8 @@ bool Session::Impl::Attention(std::uint32_t il, std::uint32_t n,
                     c.head_dim, swa ? c.sliding_window : 0, ring[il], stream,
                     kv_cache_type);
   }
-  if (layer_clock != nullptr) layer_clock->Mark();
+  if (layer_clock != nullptr)
+    layer_clock->Mark();
   hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
   if (split_attn && use_wmma && std::getenv("LAGUNA_SPLIT_DEBUG") != nullptr &&
       hipStreamIsCapturing(stream, &capture_status) == hipSuccess &&
@@ -998,20 +1001,25 @@ bool Session::Impl::DenseFfn(const DeviceLayer& layer, std::uint32_t n,
   // Same five boundaries as the MoE branch so the sub-stage report buckets
   // evenly whether a layer routes or not; a dense layer simply has nothing
   // between two of them.
-  if (ffn_clock != nullptr) ffn_clock->Mark();
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   if (!Dense(layer.ffn_gate, cxn, dense_gate.get(), n, error_msg) ||
       !Dense(layer.ffn_up, cxn, dense_up.get(), n, error_msg)) {
     return false;
   }
   rocm::Swiglu(dense_gate.get(), dense_up.get(), std::size_t{n} * c.dense_ff,
                stream);
-  if (ffn_clock != nullptr) ffn_clock->Mark();
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   if (!Dense(layer.ffn_down, dense_gate.get(), o.get(), n, error_msg))
     return false;
   rocm::AddInPlace(cx, o.get(), std::size_t{n} * c.hidden_size, stream);
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   return true;
 }
 
@@ -1135,19 +1143,20 @@ bool Session::Impl::MoeRoute(const DeviceLayer& layer, std::uint32_t n,
   const bool wide = n * used > kVecExpertRows;
   *wide_out = wide;
 
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   if (RouterBlasEnabled() && hipblas_handle != nullptr) {
     const float alpha = 1.0F;
     const float beta = 0.0F;
-    const auto status = hipblasGemmEx(
-        hipblas_handle, HIPBLAS_OP_T, HIPBLAS_OP_N,
-        static_cast<int>(c.expert_count), static_cast<int>(n),
-        static_cast<int>(c.hidden_size), &alpha,
-        static_cast<const float*>(layer.router.data), HIP_R_32F,
-        static_cast<int>(c.hidden_size), cxn, HIP_R_32F,
-        static_cast<int>(c.hidden_size), &beta, router.get(), HIP_R_32F,
-        static_cast<int>(c.expert_count), HIPBLAS_COMPUTE_32F,
-        HIPBLAS_GEMM_DEFAULT);
+    const auto status =
+        hipblasGemmEx(hipblas_handle, HIPBLAS_OP_T, HIPBLAS_OP_N,
+                      static_cast<int>(c.expert_count), static_cast<int>(n),
+                      static_cast<int>(c.hidden_size), &alpha,
+                      static_cast<const float*>(layer.router.data), HIP_R_32F,
+                      static_cast<int>(c.hidden_size), cxn, HIP_R_32F,
+                      static_cast<int>(c.hidden_size), &beta, router.get(),
+                      HIP_R_32F, static_cast<int>(c.expert_count),
+                      HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT);
     if (status != HIPBLAS_STATUS_SUCCESS) {
       return Fail(error_msg, "Laguna: router GEMM failed");
     }
@@ -1159,7 +1168,8 @@ bool Session::Impl::MoeRoute(const DeviceLayer& layer, std::uint32_t n,
                         static_cast<const float*>(layer.router_bias.data),
                         ids.get(), topk.get(), n, c.expert_count, used,
                         c.expert_weights_norm, c.expert_weights_scale, stream);
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
 
   if (!Dense(layer.gate_shexp, cxn, sh_gate.get(), n, error_msg) ||
       !Dense(layer.up_shexp, cxn, sh_up.get(), n, error_msg)) {
@@ -1167,7 +1177,8 @@ bool Session::Impl::MoeRoute(const DeviceLayer& layer, std::uint32_t n,
   }
   rocm::Swiglu(sh_gate.get(), sh_up.get(), std::size_t{n} * c.shared_ff,
                stream);
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
 
   bool scaled = false;
   if (wide) {
@@ -1206,7 +1217,8 @@ bool Session::Impl::MoeRoute(const DeviceLayer& layer, std::uint32_t n,
     }
   }
   *scaled_out = scaled;
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   return true;
 }
 
@@ -1222,7 +1234,8 @@ bool Session::Impl::MoeFinish(const DeviceLayer& layer, std::uint32_t n,
   rocm::MoeCombine(cx, down_e.get(), topk.get(),
                    scaled ? expert_scale_ptr : nullptr, sh_out.get(), nullptr,
                    n, used, c.hidden_size, stream);
-  if (ffn_clock != nullptr) ffn_clock->Mark();
+  if (ffn_clock != nullptr)
+    ffn_clock->Mark();
   return true;
 }
 
@@ -1262,7 +1275,8 @@ bool Session::Impl::Enqueue(std::uint32_t n, bool all_rows,
   // measure device time, so a gap between them is either device work the
   // marks do not cover or the host failing to keep the queue fed. This tells
   // the two apart.
-  static const bool hub_host_debug = std::getenv("LAGUNA_HOST_DEBUG") != nullptr;
+  static const bool hub_host_debug =
+      std::getenv("LAGUNA_HOST_DEBUG") != nullptr;
   static double attn_host_us = 0.0;
   static std::uint32_t attn_host_calls = 0;
   LAGUNA_HIP(hipMemcpyAsync(tokens.get(), h_tokens, n * sizeof(std::int32_t),
@@ -1295,10 +1309,12 @@ bool Session::Impl::Enqueue(std::uint32_t n, bool all_rows,
   }
   for (std::uint32_t il = 0; il < c.num_layers; ++il) {
     const DeviceLayer& L = dm.layers()[il];
-    if (layer_clock != nullptr) layer_clock->Mark();
+    if (layer_clock != nullptr)
+      layer_clock->Mark();
     rocm::RmsNormRows(cx, static_cast<const float*>(L.attn_norm.data), cxn, n,
                       c.hidden_size, 1, c.rms_eps, stream);
-    if (layer_clock != nullptr) layer_clock->Mark();
+    if (layer_clock != nullptr)
+      layer_clock->Mark();
     const auto attn_host_start = std::chrono::steady_clock::now();
     const bool attn_ok = Attention(il, n, error_msg);
     if (hub_host_debug) {
@@ -1316,10 +1332,12 @@ bool Session::Impl::Enqueue(std::uint32_t n, bool all_rows,
       return false;
     rocm::RmsNormRows(cx, static_cast<const float*>(L.ffn_norm.data), cxn, n,
                       c.hidden_size, 1, c.rms_eps, stream);
-    if (layer_clock != nullptr) layer_clock->Mark();
+    if (layer_clock != nullptr)
+      layer_clock->Mark();
     if (!(L.is_moe ? Moe(L, n, error_msg) : DenseFfn(L, n, error_msg)))
       return false;
-    if (layer_clock != nullptr) layer_clock->Mark();
+    if (layer_clock != nullptr)
+      layer_clock->Mark();
     if (tap_rows != 0 &&
         std::find(model->dflash_taps.begin(), model->dflash_taps.end(),
                   il + 1) != model->dflash_taps.end()) {

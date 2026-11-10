@@ -190,7 +190,10 @@ if (GUFO_ENABLE_WARNINGS)
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options(/W4)
   elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options(-Wall -Wextra -Wpedantic
+                        -Wno-missing-field-initializers
+                        -Wno-range-loop-construct
+                        -Wno-free-nonheap-object)
   endif()
 endif()
 

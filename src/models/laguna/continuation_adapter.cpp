@@ -89,11 +89,11 @@ LagunaComponentAdapter::LagunaComponentAdapter(
   // snapshot this context can produce. SnapshotBytes() shrinks with the
   // position; MaxSnapshotBytes() is the position-independent bound.
   std::string error;
-  auto probe = model_->CreateSession(
-      max_context_ + Session::kMaxVerifyRows, &error);
+  auto probe =
+      model_->CreateSession(max_context_ + Session::kMaxVerifyRows, &error);
   if (probe == nullptr) {
-    throw std::runtime_error(
-        "cannot size the Laguna component cache: " + error);
+    throw std::runtime_error("cannot size the Laguna component cache: " +
+                             error);
   }
   state_bytes_ = probe->MaxSnapshotBytes() + kLengthTrailerBytes;
   descriptors_.push_back(cache::ComponentDescriptor{
@@ -143,8 +143,8 @@ std::vector<cache::BackingClass> LagunaComponentAdapter::BackingPlan(
   constexpr std::size_t kMetadataPerBlock = 4096;
   constexpr std::size_t kMetadataBase = 1 << 16;
   const std::size_t block = (state_bytes_ + kPage - 1) / kPage * kPage;
-  const std::size_t blocks = std::max<std::size_t>(
-      1, ram_bytes == 0 ? 1 : ram_bytes / block);
+  const std::size_t blocks =
+      std::max<std::size_t>(1, ram_bytes == 0 ? 1 : ram_bytes / block);
   return {cache::BackingClass{
       .block_bytes = block,
       .blocks = blocks,
@@ -155,8 +155,8 @@ cache::Capabilities LagunaComponentAdapter::GetCapabilities() const {
   return {.continuation = true, .persistent_encoding = false};
 }
 
-std::span<const cache::ComponentDescriptor>
-LagunaComponentAdapter::Components() const {
+std::span<const cache::ComponentDescriptor> LagunaComponentAdapter::Components()
+    const {
   return descriptors_;
 }
 
@@ -226,9 +226,8 @@ cache::Completion LagunaComponentAdapter::CapturePrivate(
     return Completed(false);
   }
   if (length + kLengthTrailerBytes > bytes.size()) {
-    std::fprintf(stderr,
-                 "laguna capture: snapshot %zu exceeds buffer %zu\n", length,
-                 bytes.size());
+    std::fprintf(stderr, "laguna capture: snapshot %zu exceeds buffer %zu\n",
+                 length, bytes.size());
     return Completed(false);
   }
   std::string error;
@@ -280,8 +279,7 @@ cache::Completion LagunaComponentAdapter::LoadPrivate(
 
 cache::Completion LagunaComponentAdapter::CopyRowsOut(const cache::Slot&,
                                                       cache::ComponentId,
-                                                      cache::Rows,
-                                                      cache::Rows,
+                                                      cache::Rows, cache::Rows,
                                                       std::span<std::byte>,
                                                       cache::Stream&) {
   throw std::logic_error("Laguna has no append-row components");
@@ -301,11 +299,10 @@ bool LagunaComponentAdapter::Validate(
   if (!state.restoring) {
     throw std::logic_error("Laguna validation requires an active restore");
   }
-  const bool ok =
-      !state.failed && positions.size() == 1 &&
-      positions.front().id.value == 1 &&
-      positions.front().valid_rows == state.restored_position &&
-      state.session().Position() == state.restored_position;
+  const bool ok = !state.failed && positions.size() == 1 &&
+                  positions.front().id.value == 1 &&
+                  positions.front().valid_rows == state.restored_position &&
+                  state.session().Position() == state.restored_position;
   if (!ok) {
     state.failed = true;
     return false;

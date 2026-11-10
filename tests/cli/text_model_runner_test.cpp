@@ -565,7 +565,8 @@ void TestResourceClaimsAreValidatedBeforeAllocation() {
 
 // A runner written against the single-boundary PrefillThrough keeps working
 // through the default boundaries form, one checkpoint per call.
-std::size_t RegularFiles(const std::filesystem::path& directory) {
+[[maybe_unused]] std::size_t RegularFiles(
+    const std::filesystem::path& directory) {
   std::size_t files = 0;
   for (const auto& entry :
        std::filesystem::recursive_directory_iterator(directory))

@@ -3,6 +3,12 @@
 #include <future>
 #include <new>
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
+
 #include "src/cache/retention.hpp"
 #include "tests/cache/tiered_fixture.hpp"
 
@@ -546,3 +552,7 @@ int main() {
   EvictionDoesNotWaitForYieldingWriter();
   QuarantineRacingPublication();
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

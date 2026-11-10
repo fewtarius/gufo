@@ -81,6 +81,8 @@ bool DeviceProbe::WaitUsable(std::chrono::seconds bound,
       server::Logger::Warn(log_component,
                            "event=device_probe_timeout timeout_s=" +
                                std::to_string(bound.count()));
+#else
+      (void)log_component;
 #endif
       return true;
     }

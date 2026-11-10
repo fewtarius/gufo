@@ -33,9 +33,11 @@ void SetError(std::string* error, std::string message) {
   }
 }
 
+#if defined(ENGINE_ENABLE_HIP)
 bool DiskCacheEnabled(const TextDiskCacheConfig& config) {
   return !config.directory.empty() && config.capacity_bytes > 0;
 }
+#endif
 
 }  // namespace
 

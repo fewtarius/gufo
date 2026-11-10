@@ -386,7 +386,7 @@ void TestRawLogprobs() {
       observed.Accept(b);
     }
   }
-  for (const auto invalid :
+  for (const auto& invalid :
        {std::vector<float>{INFINITY}, std::vector<float>{NAN},
         std::vector<float>{-INFINITY}}) {
     bool failed = false;

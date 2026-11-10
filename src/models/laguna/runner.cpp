@@ -474,8 +474,8 @@ public:
   [[nodiscard]] std::unique_ptr<TextRunnerState> BindComponentState(
       cache::Adapter& adapter, cache::Slot& slot) const override {
     auto& laguna = dynamic_cast<LagunaComponentAdapter&>(adapter);
-    return std::make_unique<LagunaTextRunnerState>(
-        model_, max_context_, laguna.Session(slot));
+    return std::make_unique<LagunaTextRunnerState>(model_, max_context_,
+                                                   laguna.Session(slot));
   }
 
   void ReconcileComponentState(TextRunnerState& state,

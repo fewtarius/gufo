@@ -896,8 +896,8 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
   // wrong global head slot for every kv_head>=1.
   const std::uint32_t token =
       t0 + wave * kTokensPerWave + (kHeadMajor ? sub : sub / kHeadsPerKv);
-  const std::uint32_t head = kHeadMajor ? blockIdx.x
-                                        : (kv_head * kHeadsPerKv + sub % kHeadsPerKv);
+  const std::uint32_t head =
+      kHeadMajor ? blockIdx.x : (kv_head * kHeadsPerKv + sub % kHeadsPerKv);
   const bool live = token < n_tokens;
   const bool head_live = kHeadMajor || sub < kHeadsPerKv * kTokensPerWave;
   const std::uint32_t qpos = start + token;
@@ -1266,9 +1266,10 @@ __global__ __launch_bounds__(kWmmaThreads) void AttentionWmmaKernelLaguna(
         const float p0 = val[nb][2 * m] > kNegInf
                              ? __builtin_amdgcn_exp2f(val[nb][2 * m] - m_new)
                              : 0.0F;
-        const float p1 = val[nb][2 * m + 1] > kNegInf
-                             ? __builtin_amdgcn_exp2f(val[nb][2 * m + 1] - m_new)
-                             : 0.0F;
+        const float p1 =
+            val[nb][2 * m + 1] > kNegInf
+                ? __builtin_amdgcn_exp2f(val[nb][2 * m + 1] - m_new)
+                : 0.0F;
         psum += p0 + p1;
         const __half2 h2 = __floats2half2_rn(p0, p1);
         own[m] = *reinterpret_cast<const std::uint32_t*>(&h2);

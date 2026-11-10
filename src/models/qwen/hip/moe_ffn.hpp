@@ -1,9 +1,9 @@
 #ifndef GUFO_MODELS_QWEN_HIP_MOE_FFN_HPP_
 #define GUFO_MODELS_QWEN_HIP_MOE_FFN_HPP_
 
+#include "src/core/hip/profile.hpp"
 #include "src/core/model_config.hpp"
 #include "src/models/qwen/hip/executor.hpp"
-#include "src/core/hip/profile.hpp"
 #include "src/models/qwen/state.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)

@@ -3,6 +3,12 @@
 #include <cstdlib>
 #include <iostream>
 #include <new>
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
 #include <stdexcept>
 
 #include "tests/cache/prefix_index_fixture.hpp"
@@ -583,3 +589,7 @@ int main() {
   AdmissionAndValidation();
   std::cout << "prefix index tests passed\n";
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

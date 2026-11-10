@@ -29,8 +29,7 @@ namespace gufo::models::laguna {
 class LagunaComponentAdapter final : public cache::Adapter {
 public:
   LagunaComponentAdapter(std::shared_ptr<gpu::Model> model,
-                         std::uint32_t max_context,
-                         cache::Identity identity);
+                         std::uint32_t max_context, cache::Identity identity);
   ~LagunaComponentAdapter() override;
 
   [[nodiscard]] gpu::Session& Session(cache::Slot&) const;

@@ -294,18 +294,39 @@ struct TextRunnerPool::Impl {
       // cache can serve with the RAM cache off.
       // ResourceExhausted is a bad_alloc without a message of its own; name
       // the budget it refers to instead of a bare "std::bad_alloc".
-      try {
-        component_cache = std::make_unique<ComponentTextCache>(
+      //
+      // An automatic budget that leaves nothing for the cache is refused by
+      // the cache itself, with the remedies named. On a host that is exactly
+      // the size of the model plus its context, the user did not ask for that
+      // budget and can do nothing about the host, so serve without RAM
+      // checkpoints instead of refusing to start: sessions still reuse their
+      // own live state and nothing is silently lost. An explicit budget keeps
+      // the refusal, because there the user made a request the host cannot
+      // honour.
+      const bool automatic_ram = !ram_cache_options.capacity_bytes;
+      const auto build = [&](bool ram_enabled) {
+        return std::make_unique<ComponentTextCache>(
             validated.runner, state_count, std::min(requested, ceiling),
-            disk_cache_options, !ram_cache_options.capacity_bytes,
+            disk_cache_options, automatic_ram,
             std::max(ceiling, ComponentTextCache::kOffMetadataBytes),
-            ram_cache_options.enabled);
+            ram_enabled);
+      };
+      try {
+        component_cache = build(ram_cache_options.enabled);
       } catch (const cache::ResourceExhausted&) {
         throw std::runtime_error(
             "the RAM cache budget was exhausted while preparing " +
             std::to_string(state_count) +
             " sessions; use fewer --sessions, a smaller --context, or "
             "--cache-ram-bytes off");
+      } catch (const std::runtime_error& refused) {
+        if (!automatic_ram || !ram_cache_options.enabled)
+          throw;
+        Logger::Warn("cache",
+                     "schema=component-cache-v1 event=ram_cache_refused " +
+                         std::string(refused.what()) +
+                         " fallback=serve_without_checkpoints");
+        component_cache = build(false);
       }
       // An explicit budget the host cannot hold is trimmed. Say so: the user
       // asked for that much retention and gets less.

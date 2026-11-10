@@ -142,22 +142,6 @@ const LagunaTextRunnerState& RequireLagunaState(const TextRunnerState& state) {
   return *laguna;
 }
 
-class LagunaTextRunnerSnapshot final : public TextRunnerSnapshot {
-public:
-  LagunaTextRunnerSnapshot(std::shared_ptr<LagunaModel> model,
-                           std::vector<std::uint8_t> bytes,
-                           std::size_t position)
-      : model(std::move(model)), bytes(std::move(bytes)), position(position) {}
-
-  [[nodiscard]] std::size_t PayloadBytes() const noexcept override {
-    return bytes.size();
-  }
-
-  std::shared_ptr<LagunaModel> model;
-  std::vector<std::uint8_t> bytes;
-  std::size_t position;
-};
-
 class LagunaTextRunner final : public HipTextModelRunner {
 public:
   static constexpr std::size_t kPrefillChunk = 16384;
@@ -337,15 +321,11 @@ public:
         .capabilities =
             TextRunnerCapabilities{
                 .incremental_prefill = true,
-                .snapshot = true,
-                .fork = true,
                 .final_token_advance_required = false,
                 .incremental_text_is_exact = true,
                 .multi_token_decode = max_draft_tokens_ != 0,
                 .prefix_reuse = true,
-                .prefill_grid_tokens = 4096,
             },
-        .persistence = std::nullopt,
     };
   }
 
@@ -460,13 +440,6 @@ public:
       std::span<const TextRunnerToken> tokens) const override {
     return tokenizer_->Decode(tokens);
   }
-
-  [[nodiscard]] std::unique_ptr<TextRunnerState> CreateState() const override {
-    throw std::logic_error(
-        "Laguna execution slots are owned by the component cache");
-  }
-
-  [[nodiscard]] bool UsesComponentCache() const override { return true; }
 
   [[nodiscard]] std::unique_ptr<ComponentCacheResources>
   CreateComponentCacheResources(cache::ResourceLedger& ledger,
@@ -832,126 +805,6 @@ public:
   [[nodiscard]] std::size_t CheckpointPosition(
       const TextRunnerState& state) const override {
     return RequireLagunaState(state).position();
-  }
-
-  [[nodiscard]] std::size_t SnapshotPayloadBytes(
-      const TextRunnerState& state) const override {
-    return RequireLagunaState(state).session().SnapshotBytes();
-  }
-
-  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> Snapshot(
-      const TextRunnerState& state) const override {
-    const auto& laguna = RequireLagunaState(state);
-    std::vector<std::uint8_t> bytes(laguna.session().SnapshotBytes());
-    std::string error;
-    if (!laguna.session().SaveSnapshot(bytes, &error)) {
-      throw std::runtime_error("Laguna snapshot failed: " + error);
-    }
-    if (std::getenv("LAGUNA_SNAPSHOT_DEBUG") != nullptr) {
-      std::fprintf(
-          stderr,
-          "[LAGUNA_SNAPSHOT_DEBUG] save runner_pos=%zu session_pos=%u "
-          "dflash_frontier=%u bytes=%zu dflash_sum=%.6f\n",
-          laguna.position(), laguna.session().Position(),
-          laguna.session().DflashExecutor() != nullptr
-              ? laguna.session().DflashExecutor()->GetInjectedContextLength()
-              : 0U,
-          bytes.size(),
-          laguna.session().DflashExecutor() != nullptr
-              ? laguna.session().DflashExecutor()->InjectedContextChecksum()
-              : 0.0);
-    }
-    return std::make_unique<LagunaTextRunnerSnapshot>(model_, std::move(bytes),
-                                                      laguna.position());
-  }
-
-  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> SnapshotForPersistence(
-      const TextRunnerState& state) const override {
-    return Snapshot(state);
-  }
-
-  void RestoreOrFork(TextRunnerState& state,
-                     const TextRunnerSnapshot& snapshot) const override {
-    const auto* laguna_snapshot =
-        dynamic_cast<const LagunaTextRunnerSnapshot*>(&snapshot);
-    if (laguna_snapshot == nullptr ||
-        laguna_snapshot->model.get() != model_.get()) {
-      throw std::invalid_argument(
-          "Laguna snapshot does not belong to this model");
-    }
-    auto& restored = RequireLagunaState(state);
-    std::string error;
-    if (!restored.session().RestoreSnapshot(laguna_snapshot->bytes, &error)) {
-      restored.Invalidate();
-      throw std::runtime_error("Laguna snapshot restore failed: " + error);
-    }
-    if (std::getenv("LAGUNA_SNAPSHOT_DEBUG") != nullptr) {
-      std::fprintf(
-          stderr,
-          "[LAGUNA_SNAPSHOT_DEBUG] restore snapshot_pos=%zu "
-          "session_pos=%u dflash_frontier=%u dflash_sum=%.6f\n",
-          laguna_snapshot->position, restored.session().Position(),
-          restored.session().DflashExecutor() != nullptr
-              ? restored.session().DflashExecutor()->GetInjectedContextLength()
-              : 0U,
-          restored.session().DflashExecutor() != nullptr
-              ? restored.session().DflashExecutor()->InjectedContextChecksum()
-              : 0.0);
-    }
-    restored.set_position(laguna_snapshot->position);
-  }
-
-  [[nodiscard]] std::size_t PersistentSnapshotPayloadBytes(
-      const TextRunnerSnapshot& snapshot) const override {
-    const auto* laguna_snapshot =
-        dynamic_cast<const LagunaTextRunnerSnapshot*>(&snapshot);
-    if (laguna_snapshot == nullptr ||
-        laguna_snapshot->model.get() != model_.get()) {
-      throw std::invalid_argument(
-          "Laguna persistent snapshot does not belong to this model");
-    }
-    return laguna_snapshot->bytes.size();
-  }
-
-  [[nodiscard]] std::size_t SerializePersistentSnapshot(
-      const TextRunnerSnapshot& snapshot,
-      std::span<std::uint8_t> destination) const override {
-    const auto* laguna_snapshot =
-        dynamic_cast<const LagunaTextRunnerSnapshot*>(&snapshot);
-    if (laguna_snapshot == nullptr ||
-        laguna_snapshot->model.get() != model_.get() ||
-        destination.size() != laguna_snapshot->bytes.size()) {
-      throw std::invalid_argument(
-          "Laguna persistent snapshot serialization failed");
-    }
-    std::memcpy(destination.data(), laguna_snapshot->bytes.data(),
-                laguna_snapshot->bytes.size());
-    return destination.size();
-  }
-
-  void StreamPersistentSnapshot(const TextRunnerSnapshot& snapshot,
-                                const SnapshotSink& sink) const override {
-    (void)PersistentSnapshotPayloadBytes(snapshot);
-    sink(dynamic_cast<const LagunaTextRunnerSnapshot&>(snapshot).bytes);
-  }
-
-  void RestorePersistentSnapshot(
-      TextRunnerState& state,
-      std::span<const std::uint8_t> payload) const override {
-    auto& restored = RequireLagunaState(state);
-    std::string error;
-    if (!restored.session().RestoreSnapshot(payload, &error)) {
-      restored.Invalidate();
-      throw std::runtime_error("Laguna persistent snapshot restore failed: " +
-                               error);
-    }
-    const std::uint32_t position = restored.session().Position();
-    if (position == 0 || position > max_context_) {
-      restored.Invalidate();
-      throw std::runtime_error(
-          "Laguna persistent snapshot restored an invalid position");
-    }
-    restored.set_position(position);
   }
 
 private:

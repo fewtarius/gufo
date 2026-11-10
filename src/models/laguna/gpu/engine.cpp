@@ -324,6 +324,15 @@ struct Session::Impl {
   DeviceBuffer<std::int32_t> route_bounds, route_cursors, rows_token, rows_slot;
   DeviceBuffer<std::int32_t> tiles_pair, tiles_down;
   DeviceBuffer<__half> act_half, qh;
+  // Dense Q8_0 GEMM through the Q8_0 F16-dequant WMMA kernel. A dense
+  // projection is that kernel with one bucket covering every row, so the
+  // gather and scatter maps are the identity; they are built once here and
+  // the bucket bound is a two-int async copy per call. GUFO_DENSE_F16=1
+  // selects this route. See PERF-FINDINGS.md 17.2.
+  DeviceBuffer<std::int32_t> dense_rows, dense_tiles, dense_bounds;
+  DeviceBuffer<__half> xh_wide;
+  std::size_t xh_wide_k{0};
+  bool dense_ready{false};
 
   // Caches the MMQ-tile quantization of the last Dense() input so repeated
   // calls against the same activation (Q/K/V off attn_norm's output, or
@@ -595,6 +604,12 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
        sh_out.Allocate(std::size_t{tile} * c.hidden_size) &&
        dense_gate.Allocate(std::size_t{tile} * c.dense_ff) &&
        dense_up.Allocate(std::size_t{tile} * c.dense_ff) &&
+       dense_rows.Allocate(tile) &&
+       dense_tiles.Allocate((std::size_t{tile} + 127) / 128) &&
+       dense_bounds.Allocate(2) &&
+       xh_wide.Allocate(std::size_t{tile} *
+                        (xh_wide_k = std::max(q_row,
+                                              std::size_t{c.hidden_size}))) &&
        last.Allocate(std::size_t{kMaxVerifyRows} * c.hidden_size) &&
        d_logits.Allocate(std::size_t{kMaxVerifyRows} * c.vocab_size);
   ok = ok &&
@@ -619,6 +634,28 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
     const std::vector<float> efill(slots, kRoutedActScale);
     LAGUNA_HIP(hipMemcpy(expert_const.get(), efill.data(),
                          efill.size() * sizeof(float), hipMemcpyHostToDevice));
+  }
+  {
+    // Identity maps for the dense Q8_0 route: one bucket covering every row,
+    // one macro tile per 128 rows. Only the bucket bound changes per call.
+    std::vector<std::int32_t> rows(tile);
+    for (std::uint32_t i = 0; i < tile; ++i) {
+      rows[i] = static_cast<std::int32_t>(i);
+    }
+    std::vector<std::int32_t> dtiles((std::size_t{tile} + 127) / 128);
+    for (std::size_t j = 0; j < dtiles.size(); ++j) {
+      dtiles[j] = static_cast<std::int32_t>(j << 16);
+    }
+    const std::int32_t bounds[2] = {0, static_cast<std::int32_t>(tile)};
+    dense_ready =
+        hipMemcpy(dense_rows.get(), rows.data(),
+                  rows.size() * sizeof(std::int32_t), hipMemcpyHostToDevice) ==
+            hipSuccess &&
+        hipMemcpy(dense_tiles.get(), dtiles.data(),
+                  dtiles.size() * sizeof(std::int32_t),
+                  hipMemcpyHostToDevice) == hipSuccess &&
+        hipMemcpy(dense_bounds.get(), bounds, sizeof(bounds),
+                  hipMemcpyHostToDevice) == hipSuccess;
   }
   std::fill(h_logits, h_logits + std::size_t{kMaxVerifyRows} * c.vocab_size,
             0.0F);
@@ -710,6 +747,28 @@ bool Session::Impl::Dense(const DeviceTensor& w, const float* in, float* out,
     // dense path: measured 1,222 -> 1,275-1,287 tok/s pp2048 (+4-5%).
     // Falls through to the MMQ path if W8A8Gemm declines (k not a multiple
     // of 32). See laguna-port-state.md.
+    //
+    // GUFO_DENSE_F16=1 routes the same projection through the Q8_0
+    // F16-dequant WMMA kernel instead, as a single-bucket dense GEMM. On the
+    // same pass that kernel runs at about 33 TFLOP/s on Q4_K where the int8
+    // path runs at 19, and it accumulates the whole K extent in F32 with no
+    // per-K-block rescale. Measured in PERF-FINDINGS.md 17.2.
+    static const bool kDenseF16 = std::getenv("GUFO_DENSE_F16") != nullptr;
+    if (kDenseF16 && dense_ready && n >= 128 && n <= tile &&
+        w.rows % 128 == 0 && w.cols % 64 == 0 &&
+        std::size_t{w.cols} <= xh_wide_k) {
+      rocm::ToHalf(in, xh_wide.get(), std::size_t{n} * w.cols, stream);
+      const std::int32_t bound[2] = {0, static_cast<std::int32_t>(n)};
+      if (hipMemcpyAsync(dense_bounds.get(), bound, sizeof(bound),
+                         hipMemcpyHostToDevice, stream) == hipSuccess &&
+          qwen38_flash_next::rocm::RoutedF16GemmQ8Wide(
+              w.data, xh_wide.get(), dense_tiles.get(),
+              static_cast<std::uint32_t>((n + 127) / 128), dense_bounds.get(),
+              dense_rows.get(), dense_rows.get(), nullptr, out, nullptr,
+              w.rows, w.cols, stream)) {
+        return true;
+      }
+    }
     if (QuantizedTiled(in, n, w.cols) &&
         qwen38_flash_next::rocm::W8A8Gemm(w.data, q8_tiled_quant.get(), out, n,
                                           w.rows, w.cols, stream)) {

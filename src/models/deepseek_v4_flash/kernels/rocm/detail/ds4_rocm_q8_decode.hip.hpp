@@ -151,7 +151,7 @@ __device__ __forceinline__ static float q8_0_decode_accumulate(
 template<uint32_t MAXT, bool EXACT, bool PAIR = false>
 __global__ static void matmul_q8_0_preq_batch_reuse_w32_kernel(
     float* out, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t in_dim, uint64_t out_dim, uint64_t blocks, uint32_t n_tok,
+    uint64_t /*in_dim*/, uint64_t out_dim, uint64_t blocks, uint32_t n_tok,
     uint32_t rows_per_block, const unsigned char* w1 = nullptr,
     float* out1 = nullptr) {
   if constexpr (PAIR) {
@@ -227,7 +227,7 @@ __global__ static void matmul_q8_0_preq_batch_reuse_w32_kernel(
 template<uint32_t NT>
 __global__ static void matmul_q8_0_preq_group_pair_w32_kernel(
     float* out, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t in_dim, uint64_t out_dim, uint64_t blocks, uint32_t row0,
+    uint64_t /*in_dim*/, uint64_t out_dim, uint64_t blocks, uint32_t row0,
     uint32_t row1, uint32_t rows_per_block) {
   const uint64_t row =
       (uint64_t)blockIdx.x * rows_per_block + (threadIdx.x >> 5u);
@@ -288,7 +288,7 @@ __global__ static void matmul_q8_0_preq_group_pair_w32_kernel(
 template<uint32_t NT0, uint32_t NT1>
 __global__ static void matmul_q8_0_preq_ragged_group_pair_w32_kernel(
     float* out, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t in_dim, uint64_t out_dim, uint64_t blocks, uint32_t row0,
+    uint64_t /*in_dim*/, uint64_t out_dim, uint64_t blocks, uint32_t row0,
     uint32_t row1, uint32_t rows_per_block) {
   static_assert(NT0 >= 1u && NT0 <= 6u);
   static_assert(NT1 >= 1u && NT1 <= 6u);
@@ -355,7 +355,7 @@ __global__ static void matmul_q8_0_preq_ragged_group_pair_w32_kernel(
 template<uint32_t NT>
 __global__ static void matmul_q8_0_preq_equal_group_pairs_w32_kernel(
     float* out, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t in_dim, uint64_t out_dim, uint64_t blocks,
+    uint64_t /*in_dim*/, uint64_t out_dim, uint64_t blocks,
     uint32_t rows_per_block) {
   const uint64_t row =
       (uint64_t)blockIdx.x * rows_per_block + (threadIdx.x >> 5u);
@@ -421,7 +421,7 @@ __global__ static void matmul_q8_0_preq_equal_group_pairs_w32_kernel(
 template<uint32_t NT>
 __global__ static void matmul_q8_0_preq_all_rows_exact_w32_kernel(
     float* out, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t in_dim, uint64_t out_dim, uint64_t blocks,
+    uint64_t /*in_dim*/, uint64_t out_dim, uint64_t blocks,
     uint32_t rows_per_block) {
   const uint64_t row =
       (uint64_t)blockIdx.x * rows_per_block + (threadIdx.x >> 5u);
@@ -594,7 +594,7 @@ __global__ static void grouped_q8_0_a_preq_warp8_kernel(
 template<uint32_t MAXT, bool EXACT>
 __global__ static void grouped_q8_0_a_preq_batch_reuse_w32_kernel(
     float* low, const unsigned char* w, const int8_t* xq, const float* xscale,
-    uint64_t group_dim, uint64_t rank, uint32_t n_groups, uint32_t n_tokens,
+    uint64_t /*group_dim*/, uint64_t rank, uint32_t n_groups, uint32_t n_tokens,
     uint64_t blocks, uint32_t rows_per_block) {
   const uint64_t row =
       (uint64_t)blockIdx.x * rows_per_block + (threadIdx.x >> 5u);

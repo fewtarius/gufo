@@ -163,36 +163,36 @@ static bool fp16_available(const int cc) {
         (DS4_GGML_HIP_CC_IS_MTHREADS(cc) && cc >= DS4_GGML_HIP_CC_PH1);
 }
 
-static bool fast_fp16_available(const int cc) {
+static inline bool fast_fp16_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_AMD(cc) ||
         (DS4_GGML_HIP_CC_IS_NVIDIA(cc) && fp16_available(cc) && ds4_ggml_hip_highest_compiled_arch(cc) != 610) ||
         (DS4_GGML_HIP_CC_IS_MTHREADS(cc) && fp16_available(cc));
 }
 
 // To be used for feature selection of external libraries, e.g. cuBLAS.
-static bool fast_fp16_hardware_available(const int cc) {
+static inline bool fast_fp16_hardware_available(const int cc) {
     return (DS4_GGML_HIP_CC_IS_NVIDIA(cc) && cc >= DS4_GGML_HIP_CC_PASCAL && cc != 610) || DS4_GGML_HIP_CC_IS_AMD(cc) ||
         (DS4_GGML_HIP_CC_IS_MTHREADS(cc) && cc >= DS4_GGML_HIP_CC_QY2);
 }
 
 // To be used for feature selection of external libraries, e.g. cuBLAS.
-static bool fp16_mma_hardware_available(const int cc) {
+static inline bool fp16_mma_hardware_available(const int cc) {
     return (DS4_GGML_HIP_CC_IS_NVIDIA(cc) && cc >= DS4_GGML_HIP_CC_VOLTA) ||
         DS4_GGML_HIP_CC_IS_CDNA(cc) || DS4_GGML_HIP_CC_IS_RDNA3(cc) || DS4_GGML_HIP_CC_IS_RDNA4(cc) ||
         (DS4_GGML_HIP_CC_IS_MTHREADS(cc) && cc >= DS4_GGML_HIP_CC_QY2);
 }
 
-static bool bf16_mma_hardware_available(const int cc) {
+static inline bool bf16_mma_hardware_available(const int cc) {
     return (DS4_GGML_HIP_CC_IS_NVIDIA(cc) && cc >= DS4_GGML_HIP_CC_AMPERE) ||
         DS4_GGML_HIP_CC_IS_CDNA(cc) || cc >= DS4_GGML_HIP_CC_RDNA3 ||
         (DS4_GGML_HIP_CC_IS_MTHREADS(cc) && cc >= DS4_GGML_HIP_CC_PH1);
 }
 
-static bool fp32_mma_hardware_available(const int cc) {
+static inline bool fp32_mma_hardware_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_CDNA(cc);
 }
 
-static bool amd_mfma_available(const int cc) {
+static inline bool amd_mfma_available(const int cc) {
 #if !defined(GGML_HIP_NO_MMQ_MFMA)
     return DS4_GGML_HIP_CC_IS_CDNA(cc);
 #else
@@ -200,27 +200,27 @@ static bool amd_mfma_available(const int cc) {
 #endif //!defined(GGML_HIP_NO_MMQ_MFMA)
 }
 
-static bool amd_wmma_available(const int cc) {
+static inline bool amd_wmma_available(const int cc) {
     return (DS4_GGML_HIP_CC_IS_RDNA4(cc) || DS4_GGML_HIP_CC_IS_RDNA3(cc));
 }
 
-static bool volta_mma_available(const int cc) {
+static inline bool volta_mma_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) == DS4_GGML_HIP_CC_VOLTA;
 }
 
-static bool turing_mma_available(const int cc) {
+static inline bool turing_mma_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) >= DS4_GGML_HIP_CC_TURING;
 }
 
-static bool ampere_mma_available(const int cc) {
+static inline bool ampere_mma_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) >= DS4_GGML_HIP_CC_AMPERE;
 }
 
-static bool cp_async_available(const int cc) {
+static inline bool cp_async_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) >= DS4_GGML_HIP_CC_AMPERE;
 }
 
-static bool blackwell_mma_available(const int cc) {
+static inline bool blackwell_mma_available(const int cc) {
     return DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) >= DS4_GGML_HIP_CC_BLACKWELL &&
            ds4_ggml_hip_highest_compiled_arch(cc) < DS4_GGML_HIP_CC_RUBIN;
 }
@@ -651,7 +651,7 @@ static __device__ __forceinline__ float ds4_ggml_hip_ue4m3_to_fp32(uint8_t x) {
 #endif // defined(GGML_USE_HIP) && defined(CDNA3) && defined(FP8_AVAILABLE) && HIP_VERSION >= 60200000
 }
 
-static __device__ __forceinline__ uint8_t ds4_ggml_hip_fp32_to_ue4m3(float x) {
+static __device__ __forceinline__ uint8_t ds4_ggml_hip_fp32_to_ue4m3(float /*x*/) {
      NO_DEVICE_CODE; // Used only for NVFP4 Scales for Activations, only for Blackwell
 }
 
@@ -683,7 +683,7 @@ __device__ __forceinline__ uint8_t ds4_ggml_hip_float_to_fp4_e2m1(float x, float
 // and a shift:
 //
 // n/d = (mulhi(n, mp) + n) >> L;
-static const uint3 init_fastdiv_values(uint64_t d_64) {
+static inline const uint3 init_fastdiv_values(uint64_t d_64) {
     GGML_ASSERT(d_64 != 0);
     GGML_ASSERT(d_64 <= std::numeric_limits<uint32_t>::max());
 

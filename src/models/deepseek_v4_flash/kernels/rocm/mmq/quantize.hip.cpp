@@ -85,9 +85,11 @@ __device__ __forceinline__ uint8_t compute_e8m0_scale(float amax) {
 
 
 static __global__ void quantize_mmq_nvfp4(
-        const float * __restrict__ x, const int32_t * __restrict__ ids, void * __restrict__ vy,
-        const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
-        const int64_t ne0, const int64_t ne1, const int64_t ne2) {
+        const float * __restrict__ /*x*/, const int32_t * __restrict__ /*ids*/,
+        void * __restrict__ /*vy*/,
+        const int64_t /*ne00*/, const int64_t /*s01*/, const int64_t /*s02*/,
+        const int64_t /*s03*/,
+        const int64_t /*ne0*/, const int64_t /*ne1*/, const int64_t /*ne2*/) {
     NO_DEVICE_CODE; // This is for Blackwell NVFP4 activations only.
 
 }

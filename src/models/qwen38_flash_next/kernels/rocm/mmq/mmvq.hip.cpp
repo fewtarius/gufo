@@ -65,7 +65,7 @@ __launch_bounds__(32 * token_waves, 1) static __global__
     sum[j] = warp_reduce_sum<32>(sum[j]);
     if constexpr (has_gate)
       gate_sum[j] = warp_reduce_sum<32>(gate_sum[j]);
-    if (lane == 0 && (token_waves == 1 || first_token + j < valid_tokens)) {
+    if (lane == 0 && (token_waves == 1 || first_token + j < static_cast<int>(valid_tokens))) {
       float value = sum[j];
       if constexpr (has_gate)
         value *= ggml_hip_op_silu_single(gate_sum[j]);

@@ -32,7 +32,7 @@ ds4_gemm_f16_wmma_kernel(OutT *__restrict__ out,
                          const __half *__restrict__ weight,
                          const __half *__restrict__ act,
                          uint32_t m,
-                         uint32_t n,
+                         uint32_t /*n*/,
                          uint32_t k,
                          uint32_t ldc,
                          uint64_t stride_a,
@@ -187,7 +187,7 @@ ds4_gemm_f16_wmma_kernel(OutT *__restrict__ out,
  * per CU is the floor that kept only the shapes this kernel wins. */
 #define DS4_WMMA_GEMM_MIN_BLOCKS 240u
 
-static int ds4_gemm_f16_wmma_eligible(uint64_t m, uint64_t n, uint64_t k) {
+static inline int ds4_gemm_f16_wmma_eligible(uint64_t m, uint64_t n, uint64_t k) {
     /* Static LDS is BM*BK + BN*BK halves = 24 KiB, so two workgroups per CU. */
     if (!g_rocm_gfx1151 || m % DS4_WMMA_GEMM_BM != 0u ||
         n % DS4_WMMA_GEMM_BN != 0u || k % DS4_WMMA_GEMM_BK != 0u ||
@@ -515,7 +515,7 @@ static void hip_launch_grouped_q8_a_sharedx_strided_bt(
     }
 }
 
-static void hip_launch_grouped_q8_a_sharedx_strided(
+static inline void hip_launch_grouped_q8_a_sharedx_strided(
         float *low,
         const unsigned char *w,
         const float *heads,

@@ -159,7 +159,6 @@ int qfn_mmq_dense_gemm_preq_impl(
     const int64_t ne10_padded  = GGML_PAD((int64_t)K, MATRIX_ROW_PADDING);
     const int64_t ne11         = N;
     const int64_t ne12         = 1;
-    const int64_t ne13         = 1;
     const size_t y_block_size = sizeof(block_q8_1_mmq);
     const size_t y_values_per_block = 4 * QK8_1;
 

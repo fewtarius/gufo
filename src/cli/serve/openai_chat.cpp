@@ -3018,7 +3018,7 @@ private:
 };
 
 HttpResponse NonStreamingResponse(
-    const ParsedChatRequest& request, TextGenerationBackend& backend,
+    const ParsedChatRequest& request, TextGenerationBackend& /*backend*/,
     const std::shared_ptr<TextGenerationBackend::GenerationRequest>& generation,
     TextGenerationBackend::InitialOutputState initial_output_state) {
   const auto result = generation->Wait();
@@ -3091,7 +3091,7 @@ HttpResponse NonStreamingResponse(
 }
 
 HttpResponse StreamingResponse(
-    const ParsedChatRequest& request, TextGenerationBackend& backend,
+    const ParsedChatRequest& request, TextGenerationBackend& /*backend*/,
     std::shared_ptr<TextGenerationBackend::GenerationRequest> generation,
     TextGenerationBackend::InitialOutputState initial_output_state) {
   const std::string id = RandomId("chatcmpl-");

@@ -235,11 +235,11 @@ static int hip_tensor_has_i32(const ds4_gpu_tensor *t, uint64_t elems) {
     return hip_tensor_has_elems(t, elems, sizeof(int32_t));
 }
 
-static int hip_tensor_has_f16(const ds4_gpu_tensor *t, uint64_t elems) {
+static inline int hip_tensor_has_f16(const ds4_gpu_tensor *t, uint64_t elems) {
     return hip_tensor_has_elems(t, elems, sizeof(__half));
 }
 
-static int hip_tensor_has_u16(const ds4_gpu_tensor *t, uint64_t elems) {
+static inline int hip_tensor_has_u16(const ds4_gpu_tensor *t, uint64_t elems) {
     return hip_tensor_has_elems(t, elems, sizeof(uint16_t));
 }
 
@@ -250,12 +250,6 @@ static const char *hip_model_range_ptr_from_fd(
         const char *what, bool wait = true);
 __global__ static void dequant_q8_0_to_f16_kernel(
         __half *out,
-        const unsigned char *w,
-        uint64_t in_dim,
-        uint64_t out_dim,
-        uint64_t blocks);
-__global__ static void dequant_q8_0_to_f32_kernel(
-        float *out,
         const unsigned char *w,
         uint64_t in_dim,
         uint64_t out_dim,

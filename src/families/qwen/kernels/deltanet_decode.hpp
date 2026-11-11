@@ -246,7 +246,11 @@ __launch_bounds__(Resident ? 128 : 1024, 1) __global__
       const float d_j = (v_h[j] - u_j) * beta_h;
 
       float o_j = 0.0F;
-#pragma unroll
+      // No unroll pragma: this body's register pressure makes a full unroll
+      // fail, so the compiler already emits the rolled loop. The sized hint
+      // that replaced it measured no difference, so leave the choice to the
+      // optimizer rather than carrying a warning for a transformation that
+      // never happens.
       for (std::size_t vi = 0; vi < key_vec; ++vi) {
         float4 st;
         if constexpr (Resident)

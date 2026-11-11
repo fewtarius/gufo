@@ -646,7 +646,7 @@ static uint64_t     g_f16_input_count = 0;
 static __half      *g_f16_input_mirror = NULL;
 static uint64_t     g_f16_input_mirror_bytes = 0;
 
-static void hip_f16_input_release(void) {
+static inline void hip_f16_input_release(void) {
     if (g_f16_input_mirror) (void)hipFree(g_f16_input_mirror);
     g_f16_input_mirror = NULL;
     g_f16_input_mirror_bytes = 0;

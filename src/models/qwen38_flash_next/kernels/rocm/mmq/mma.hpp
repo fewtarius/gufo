@@ -80,7 +80,7 @@ namespace ggml_hip_mma {
             return false;
         }
 
-        static __device__ __forceinline__ int get_i(const int l) {
+        static __device__ __forceinline__ int get_i(const int /*l*/) {
             if constexpr (I == 16 && J == 4) {
                 return threadIdx.x % 16;
             } else if constexpr (I == 16 && J == 8) {
@@ -124,7 +124,7 @@ namespace ggml_hip_mma {
             return false;
         }
 
-        static __device__ __forceinline__ int get_i(const int l) {
+        static __device__ __forceinline__ int get_i(const int /*l*/) {
             if constexpr (supported()) {
                 return threadIdx.x % 16;
             } else {

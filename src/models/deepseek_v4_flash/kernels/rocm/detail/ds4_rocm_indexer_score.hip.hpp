@@ -306,5 +306,18 @@ __global__ static void indexer_scores_wmma128_kernel(
       }
     }
   }
+#else
+  (void)scores;
+  (void)query_input;
+  (void)weights;
+  (void)index_input;
+  (void)n_comp;
+  (void)n_tokens;
+  (void)pos0;
+  (void)n_head;
+  (void)head_dim;
+  (void)ratio;
+  (void)scale;
+  (void)causal;
 #endif
 }

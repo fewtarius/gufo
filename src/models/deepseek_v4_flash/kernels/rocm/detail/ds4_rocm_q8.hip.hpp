@@ -425,25 +425,6 @@ __global__ static void dequant_q8_0_to_f16_kernel(
     out[gid] = __hmul(scale, __float2half((float)q));
 }
 
-__global__ static void dequant_q8_0_to_f32_kernel(
-        float *out,
-        const unsigned char *w,
-        uint64_t in_dim,
-        uint64_t out_dim,
-        uint64_t blocks) {
-    uint64_t gid = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
-    uint64_t n = in_dim * out_dim;
-    if (gid >= n) return;
-    uint64_t row = gid / in_dim;
-    uint64_t i = gid - row * in_dim;
-    uint64_t b = i / 32;
-    uint64_t j = i - b * 32;
-    const unsigned char *blk = w + (row * blocks + b) * 34;
-    const float scale = q8_0_scale_scalar(blk);
-    const int8_t q = *(const int8_t *)(blk + 2 + j);
-    out[gid] = scale * (float)q;
-}
-
 /* LDS-tiled transpose for the same dequantization.
  *
  * A scalar kernel gives each lane a private output address `i * out_dim + row`,

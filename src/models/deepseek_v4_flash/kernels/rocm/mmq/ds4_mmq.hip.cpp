@@ -2834,7 +2834,7 @@ static __device__ __forceinline__ float ds4_mmq_vec_dot_q8_1(
 }
 
 static __device__ __forceinline__ float ds4_mmq_half_warp_sum_f32(float v) {
-    const uint32_t mask = 0xffffu << (threadIdx.x & 16u);
+    [[maybe_unused]] const uint32_t mask = 0xffffu << (threadIdx.x & 16u);
     for (int offset = 8; offset > 0; offset >>= 1) {
         v += __shfl_down_sync(mask, v, offset, 16);
     }
@@ -3141,7 +3141,7 @@ static __global__ void ds4_mmq_moe_gate_up_mid_vec_kernel(
         float            * __restrict__ mid,
         const uint32_t ncols_x,
         const uint32_t nrows_x,
-        const uint32_t n_tokens,
+        const uint32_t /*n_tokens*/,
         const uint32_t n_experts,
         const uint32_t stride_row_x,
         const uint32_t stride_col_y,
@@ -3493,7 +3493,7 @@ __global__ void q8_0_aligned_dense_vec_kernel(
         const int4        *qs,         // aligned codes, 2 int4 per block
         const __half      *dq,         // block scales
         const block_q8_1  *x8,         // [K/32] canonical Q8_1 activation
-        int                M,
+        int                /*M*/,
         int                nb)         // blocks per row = K/32
 {
     const int row  = blockIdx.x;

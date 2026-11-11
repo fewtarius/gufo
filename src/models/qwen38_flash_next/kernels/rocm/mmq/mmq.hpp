@@ -64,7 +64,7 @@ static_assert(sizeof(block_q8_1_mmq) == 4*QK8_1 + 4*sizeof(half2), "Unexpected b
 static_assert(sizeof(block_q8_1_mmq) == 4*sizeof(block_q8_1),      "Unexpected block_q8_1_mmq size");
 static_assert(sizeof(block_fp4_mmq)  == sizeof(block_q8_1_mmq),    "Unexpected block_fp4_mmq size");
 
-static mmq_q8_1_ds_layout mmq_get_q8_1_ds_layout(const ggml_type type_x) {
+static inline mmq_q8_1_ds_layout mmq_get_q8_1_ds_layout(const ggml_type type_x) {
     switch (type_x) {
         case GGML_TYPE_Q1_0:
             return MMQ_Q8_1_DS_LAYOUT_D4;
@@ -112,7 +112,7 @@ struct tile_x_sizes {
     int sc;
 };
 
-static int get_mmq_x_max_host(const int cc) {
+static inline int get_mmq_x_max_host(const int cc) {
     int base = amd_wmma_available(cc) ? 128 : 64;
     // RDNA 3.5 peaks at x=80 for the IQ2_XXS routed-MoE workload.
     if (base > 80) base = 80;
@@ -140,7 +140,7 @@ static_assert(QFN_WMMA_MMQ_Y == 32 ||
 // Four-wave RDNA WMMA tiles cut the decoded-weight LDS footprint enough to
 // admit more workgroups; MFMA devices retain their eight-wave tile. The
 // compile-time override is only for controlled geometry sweeps.
-static int get_mmq_y_host(const int cc) {
+static inline int get_mmq_y_host(const int cc) {
     return GGML_HIP_CC_IS_RDNA1(cc) ? 64 :
            (amd_wmma_available(cc) ? QFN_WMMA_MMQ_Y : 128);
 }
@@ -254,7 +254,7 @@ static constexpr __host__ __device__ int mmq_get_mma_tile_x_k(ggml_type type) {
 #define MMQ_TILE_Y_K     (MMQ_TILE_NE_K + MMQ_TILE_NE_K / QI8_1)
 #define MMQ_TILE_Y_FP4_K MMQ_TILE_Y_K
 
-static int mmq_get_granularity_host(const int mmq_x, const int cc) {
+static inline int mmq_get_granularity_host(const int mmq_x, const int cc) {
     if (amd_mfma_available(cc) || amd_wmma_available(cc)) {
         return mmq_x >= 128 ? 32 : 16;
     } else if (false) {
@@ -306,7 +306,7 @@ static_assert(QFN_WMMA_MMQ_NCW == 1 || QFN_WMMA_MMQ_NCW == 2 ||
               QFN_WMMA_MMQ_NCW == 4,
               "RDNA WMMA MMQ column-warp factor must be 1, 2, or 4");
 
-static int mmq_get_nwarps_host(const int cc, const int warp_size) {
+static inline int mmq_get_nwarps_host(const int cc, const int warp_size) {
     return amd_mfma_available(cc) ? 8 :
         (amd_wmma_available(cc) ? (QFN_WMMA_MMQ_Y/16)*QFN_WMMA_MMQ_NCW
                                 : 256/warp_size);
@@ -1999,7 +1999,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
             const half2 dm = bxi->dm * make_half2(1.0f, -1.0f);
 
     #pragma unroll
-            for (int l = 0; l < sizeof(int); ++l) {
+            for (int l = 0; l < static_cast<int>(sizeof(int)); ++l) {
                 x_dm[i*MMQ_MMA_TILE_X_K_Q8_1 + sizeof(int)*ksc + l] = dm*make_half2(sc8[l], m8[l]);
             }
         }
@@ -3996,7 +3996,7 @@ static size_t mmq_get_nbytes_shared(
 }
 
 template <ggml_type type, int mmq_x>
-static void launch_mul_mat_q(ggml_backend_hip_context & ctx, const mmq_args & args, hipStream_t stream) {
+static void launch_mul_mat_q(ggml_backend_hip_context & /*ctx*/, const mmq_args & args, hipStream_t stream) {
     const int id = ggml_hip_get_device();
     const int cc = ggml_hip_info().devices[id].cc;
     const int nsm = ggml_hip_info().devices[id].nsm;
@@ -4121,8 +4121,6 @@ static void launch_mul_mat_q(ggml_backend_hip_context & ctx, const mmq_args & ar
     // For the stream-k kernel it is possible to run it with tiling by setting the number of HIP blocks equal to the number of tiles.
     // This is worthwhile if the efficiency of tiling is high and skipping the fixup kernel is more important.
     const int ntiles_dst = ntx * nty * ntzw;
-    const int tiles_nwaves = (ntiles_dst + nsm - 1) / nsm;
-    const int tiles_efficiency_percent = 100 * ntiles_dst / (nsm*tiles_nwaves);
     const dim3 block_nums_stream_k(nsm, 1, 1);
 
     GGML_ASSERT(ntiles_dst * blocks_per_ne00_fd.z < (1 << 30)); // Assert that variable kbc will not overflow.

@@ -396,7 +396,7 @@ static __global__ void mul_mat_vec_q(
         const uint32_t stride_col_dst, const uint3 channel_ratio, const uint32_t stride_channel_x,
         const uint32_t stride_channel_y, const uint32_t stride_channel_dst, const uint3 sample_ratio,
         const uint32_t stride_sample_x, const uint32_t stride_sample_y, const uint32_t stride_sample_dst,
-        const uint32_t ids_stride) {
+        const uint32_t /*ids_stride*/) {
 
     constexpr int qk  = ds4_ggml_hip_type_traits<type>::qk;
     constexpr int qi  = ds4_ggml_hip_type_traits<type>::qi;

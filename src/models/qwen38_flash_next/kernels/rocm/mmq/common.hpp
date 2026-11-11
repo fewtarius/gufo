@@ -61,7 +61,7 @@
 #define GGML_HIP_CC_IS_CDNA3(cc)   (cc >= GGML_HIP_CC_CDNA3 && cc < GGML_HIP_CC_CDNA4)
 #define GGML_HIP_CC_IS_CDNA4(cc)   (cc >= GGML_HIP_CC_CDNA4 && cc < GGML_HIP_CC_RDNA1)
 
-static int ggml_hip_highest_compiled_arch(const int arch) {
+static inline int ggml_hip_highest_compiled_arch(const int arch) {
     return arch;
 }
 
@@ -120,7 +120,7 @@ void ggml_hip_error(const char * stmt, const char * func, const char * file, int
 #define AMD_WMMA_AVAILABLE
 #endif // defined(RDNA4)
 
-static bool amd_mfma_available(const int cc) {
+static inline bool amd_mfma_available(const int cc) {
 #if !defined(GGML_HIP_NO_MMQ_MFMA)
     return GGML_HIP_CC_IS_CDNA(cc);
 #else
@@ -128,7 +128,7 @@ static bool amd_mfma_available(const int cc) {
 #endif //!defined(GGML_HIP_NO_MMQ_MFMA)
 }
 
-static bool amd_wmma_available(const int cc) {
+static inline bool amd_wmma_available(const int cc) {
     return (GGML_HIP_CC_IS_RDNA4(cc) || GGML_HIP_CC_IS_RDNA3(cc));
 }
 
@@ -632,7 +632,7 @@ static __device__ __forceinline__ float ggml_hip_ue4m3_to_fp32(uint8_t x) {
 #endif // defined(CDNA3) && defined(FP8_AVAILABLE) && HIP_VERSION >= 60200000
 }
 
-static __device__ __forceinline__ uint8_t ggml_hip_fp32_to_ue4m3(float x) {
+static __device__ __forceinline__ uint8_t ggml_hip_fp32_to_ue4m3(float /*x*/) {
      NO_DEVICE_CODE; // Used only for NVFP4 Scales for Activations, only for Blackwell
 }
 
@@ -664,7 +664,7 @@ __device__ __forceinline__ uint8_t ggml_hip_float_to_fp4_e2m1(float x, float e) 
 // and a shift:
 //
 // n/d = (mulhi(n, mp) + n) >> L;
-static const uint3 init_fastdiv_values(uint64_t d_64) {
+static inline const uint3 init_fastdiv_values(uint64_t d_64) {
     GGML_ASSERT(d_64 != 0);
     GGML_ASSERT(d_64 <= std::numeric_limits<uint32_t>::max());
 

@@ -97,9 +97,6 @@ namespace {
 constexpr std::uint32_t kHeadDim = detail::kTiledAttentionHeadDim;
 constexpr std::uint32_t kQueryHeads = detail::kTiledAttentionQueryHeads;
 constexpr std::uint32_t kKvHeads = detail::kTiledAttentionKvHeads;
-constexpr std::uint32_t kGqa = kQueryHeads / kKvHeads;
-constexpr std::uint32_t kAttnWidth = kQueryHeads * kHeadDim;
-constexpr std::uint32_t kKvWidth = kKvHeads * kHeadDim;
 
 using v16h = __attribute__((__vector_size__(16 * sizeof(_Float16)))) _Float16;
 using v8f = __attribute__((__vector_size__(8 * sizeof(float)))) float;

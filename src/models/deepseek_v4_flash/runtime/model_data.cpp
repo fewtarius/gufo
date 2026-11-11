@@ -104,28 +104,9 @@ static uint32_t ds4_expected_layer_compress_ratio(uint32_t il) {
     return (il & 1u) == 0 ? 4u : 128u;
 }
 
-static void ds4_die_errno(const char *what, const char *path) {
-    fprintf(stderr, "ds4: %s '%s': %s\n", what, path, strerror(errno));
-    throw std::runtime_error("incompatible or invalid DeepSeek artifact");
-}
-
 static bool ds4_streq(ds4_str s, const char *z) {
     size_t n = strlen(z);
     return s.len == n && memcmp(s.ptr, z, n) == 0;
-}
-
-static bool ds4_str_eq(ds4_str a, ds4_str b) {
-    return a.len == b.len && memcmp(a.ptr, b.ptr, a.len) == 0;
-}
-
-static uint64_t hash_bytes(const void *ptr, uint64_t len) {
-    const auto *p = static_cast<const uint8_t *>(ptr);
-    uint64_t h = 1469598103934665603ull;
-    for (uint64_t i = 0; i < len; i++) {
-        h ^= p[i];
-        h *= 1099511628211ull;
-    }
-    return h;
 }
 
 void *ds4_xcalloc(size_t n, size_t size) {
@@ -479,8 +460,7 @@ static void model_close(ds4_model *m) {
     if (gufo::platform::FileValid(m->fd)) {
         gufo::platform::CloseFile(m->fd);
     }
-    m->map = nullptr;
-    memset(m, 0, sizeof(*m));
+    *m = ds4_model{};
     m->fd = gufo::platform::kInvalidFile;
 }
 
@@ -572,7 +552,7 @@ static void parse_tensors(ds4_model *m, ds4_cursor *c) {
 
 /* Open and map the GGUF once for resident ROCm tensor views. */
 static void model_open(ds4_model *m, const char *path) {
-    memset(m, 0, sizeof(*m));
+    *m = ds4_model{};
     m->fd = gufo::platform::OpenReadFile(path);
     if (!gufo::platform::FileValid(m->fd) || !m->mapping.Open(path)) {
         if (gufo::platform::FileValid(m->fd)) {

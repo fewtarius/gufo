@@ -64,7 +64,7 @@ static_assert(sizeof(block_q8_1_mmq) == 4*QK8_1 + 4*sizeof(half2), "Unexpected b
 static_assert(sizeof(block_q8_1_mmq) == 4*sizeof(block_q8_1),      "Unexpected block_q8_1_mmq size");
 static_assert(sizeof(block_fp4_mmq)  == sizeof(block_q8_1_mmq),    "Unexpected block_fp4_mmq size");
 
-static mmq_q8_1_ds_layout mmq_get_q8_1_ds_layout(const ggml_type type_x) {
+static inline mmq_q8_1_ds_layout mmq_get_q8_1_ds_layout(const ggml_type type_x) {
     switch (type_x) {
         case GGML_TYPE_Q1_0:
             return MMQ_Q8_1_DS_LAYOUT_D4;
@@ -112,7 +112,7 @@ struct tile_x_sizes {
     int sc;
 };
 
-static int get_mmq_x_max_host(const int cc) {
+static inline int get_mmq_x_max_host(const int cc) {
     int base = (turing_mma_available(cc) || amd_wmma_available(cc)) ? 128 :
         DS4_GGML_HIP_CC_IS_NVIDIA(cc) && ds4_ggml_hip_highest_compiled_arch(cc) >= DS4_GGML_HIP_CC_VOLTA ?
 #ifdef DS4_GGML_HIP_FORCE_MMQ
@@ -148,7 +148,7 @@ static_assert(DS4_ROCM_WMMA_MMQ_Y == 32 ||
 // Four-wave RDNA WMMA tiles cut the decoded-weight LDS footprint enough to
 // admit more workgroups; MFMA devices retain their eight-wave tile. The
 // compile-time override is only for controlled geometry sweeps.
-static int get_mmq_y_host(const int cc) {
+static inline int get_mmq_y_host(const int cc) {
     return DS4_GGML_HIP_CC_IS_AMD(cc) ?
         (DS4_GGML_HIP_CC_IS_RDNA1(cc) ? 64 :
          (amd_wmma_available(cc) ? DS4_ROCM_WMMA_MMQ_Y : 128)) :
@@ -264,7 +264,7 @@ static constexpr __host__ __device__ int mmq_get_mma_tile_x_k(ggml_type type) {
 #define MMQ_TILE_Y_K     (MMQ_TILE_NE_K + MMQ_TILE_NE_K / QI8_1)
 #define MMQ_TILE_Y_FP4_K MMQ_TILE_Y_K
 
-static int mmq_get_granularity_host(const int mmq_x, const int cc) {
+static inline int mmq_get_granularity_host(const int mmq_x, const int cc) {
     if (amd_mfma_available(cc) || amd_wmma_available(cc)) {
         return mmq_x >= 128 ? 32 : 16;
     } else if (turing_mma_available(cc) && mmq_x >= 48) {
@@ -318,7 +318,7 @@ static_assert(DS4_ROCM_WMMA_MMQ_NCW == 1 || DS4_ROCM_WMMA_MMQ_NCW == 2 ||
               DS4_ROCM_WMMA_MMQ_NCW == 4,
               "RDNA WMMA MMQ column-warp factor must be 1, 2, or 4");
 
-static int mmq_get_nwarps_host(const int cc, const int warp_size) {
+static inline int mmq_get_nwarps_host(const int cc, const int warp_size) {
     return amd_mfma_available(cc) ? 8 :
         (amd_wmma_available(cc) ? (DS4_ROCM_WMMA_MMQ_Y/16)*DS4_ROCM_WMMA_MMQ_NCW
                                 : 256/warp_size);
@@ -2008,7 +2008,7 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
             const half2 dm = bxi->dm * make_half2(1.0f, -1.0f);
 
     #pragma unroll
-            for (int l = 0; l < sizeof(int); ++l) {
+            for (int l = 0; l < static_cast<int>(sizeof(int)); ++l) {
                 x_dm[i*MMQ_MMA_TILE_X_K_Q8_1 + sizeof(int)*ksc + l] = dm*make_half2(sc8[l], m8[l]);
             }
         }

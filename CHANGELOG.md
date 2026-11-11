@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Gufo follows
 [Semantic Versioning](https://semver.org/) under the compatibility policy in
 [the release guide](docs/internal/releasing.md).
 
+This file records upstream releases, and `version.txt` names the one the tree
+is based on. The fork's own changes between two adopted releases are the
+commits between their tags; see [versions](docs/versions.md).
+
 ## [0.33.0](https://github.com/gufo-org/gufo/compare/v0.32.0...v0.33.0) (2026-11-09)
 
 

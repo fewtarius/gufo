@@ -1,8 +1,7 @@
 # Benchmarks
 
-The speeds on the model pages and on [gufo.blog](https://gufo.blog/benchmarks)
-come from one method. This page explains what the numbers mean and how to
-measure your own.
+The speeds on the model pages come from one method and one harness. This page
+explains what the numbers mean and how to measure your own.
 
 ## What is measured
 
@@ -18,10 +17,17 @@ of memory, and each one carries the date it was measured.
 - **Depth** rows start from a long conversation already in the context, because
   decoding slows as the context grows.
 
-Measurements go through the HTTP server, as a client would see them, and
-repeat the same workload on the reference project of each model: llama.cpp
-for the Qwen models and antirez/ds4 for DeepSeek. A comparison the reference
-can't run is marked N/A; a cell still being measured is marked TODO.
+Measurements go through the HTTP server, as a client would see them. The tables
+report Gufo's own throughput, not a comparison against another engine: a
+comparison has to be re-measured whenever either engine changes, so each table
+carries Gufo's results and the revision that produced them.
+
+Each table names the device and the revision it was measured on, and the
+artifact beside it under `docs/internal/models/<model>/artifacts/` records the
+exact command. That matters because the instruments differ: a row measured with
+`gufo serve` is a request against a cached prefix, while `gufo prompt` or
+`gufo bench` may prefill the whole prompt at once. Those report different rates
+for the same weights, so do not compare one against the other.
 
 Speculative modes are faster on text that is easy to predict. The tables say
 when a row includes repetitive output, so a peak isn't mistaken for a typical

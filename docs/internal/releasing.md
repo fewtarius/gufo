@@ -1,13 +1,19 @@
 # Releasing
 
-How pull request titles drive versions, how a release is cut and published, and
-how the extension API is versioned alongside. What a version promises to users
-is in [versions](../versions.md).
+How this fork relates to upstream's versions, how a pull request title becomes
+a commit, how an upstream release is adopted and how the fork tags one. What a
+version promises to users is in [versions](../versions.md).
+
+This fork publishes no binaries. The container image, the Debian package and the
+Windows ZIP belong to upstream [gufo-org/gufo](https://github.com/gufo-org/gufo);
+the fork ships source. The fork's release automation was removed because it
+drove upstream's release pull requests, Toolboxes' publishing and the website
+sync, none of which exist here.
 
 ## Pull request titles
 
-Gufo squash-merges every pull request, so its title becomes the one commit on
-`main` and the input to release automation. Titles have this form:
+A pull request is squash-merged into `unstable`, so its title becomes the one
+commit that lands. Titles have this form:
 
 ```text
 <type>[(optional-scope)][!]: <description>
@@ -45,118 +51,51 @@ reads the table and examples from this page.
 
 ## Versions
 
-Gufo follows Semantic Versioning over the documented CLI, HTTP API and public
-Nix flake outputs. Before 1.0.0, `fix` and `perf` bump the patch, and `feat` and
-breaking changes bump the minor. After 1.0.0, breaking changes bump the major;
-1.0.0 itself is an explicit decision, never automatic. A release takes the
-largest bump among its changes.
+Semantic Versioning applies to the documented CLI, HTTP API and public Nix flake
+outputs. Before 1.0.0, `fix` and `perf` bump the patch, and `feat` and breaking
+changes bump the minor. After 1.0.0, breaking changes bump the major; 1.0.0
+itself is an explicit decision, never automatic.
 
-Ordinary pull requests never edit `version.txt`, `CHANGELOG.md` or the release
-manifest; release automation owns them. Tags are `vX.Y.Z` and never move.
+The version number belongs to upstream. `version.txt` holds the upstream release
+the tree is based on, and adopting an upstream release is what moves it. The
+fork's own work does not raise it, because the fork has no release line of its
+own to version.
 
-## Cutting a release
+Ordinary pull requests never edit `version.txt` or `CHANGELOG.md`.
 
-1. A maintainer runs **Release automation** (`release-please.yml`) on `main`
-   from the Actions tab; it has no schedule.
-2. It opens or updates the release pull request, which bumps `version.txt`,
-   `CHANGELOG.md` and the release manifest from the Conventional Commit history.
-   That pull request runs the normal CI plus the full Devlab functional tier.
-3. The workflow waits up to 160 minutes for the title check, repository checks
-   and `devlab/functional`. On any failure, error or timeout it leaves the pull
-   request open and comments on it.
-4. When everything passes, it squash-merges, creates the tag and the GitHub
-   Release, and sends the tag as a `gufo-release` dispatch to Toolboxes and to
-   the [website](https://github.com/gufo-org/website).
+## Adopting an upstream release
 
-Nix keeps release and source identity apart. The default package reports
-`gufo version development (<revision>)`; the `release` package, built from a
-tag, reads `version.txt` and reports `gufo version X.Y.Z (<revision>)`.
+1. `git fetch upstream` and merge `upstream/main` into a branch off `unstable`.
+2. Resolve conflicts. They land in the upstream files the fork edits; the list
+   is in [FORK.md](../../FORK.md). Keep the fork's edits as their own commits so
+   the resolution stays a reviewable diff.
+3. Take `version.txt` and `CHANGELOG.md` from upstream. They describe upstream's
+   release, not the fork's work.
+4. Run `nix flake check` and the affected model suites. A shared-infrastructure
+   change needs the GPU and functional tiers, not just the hosted CPU gate.
+5. Merge into `unstable`, then fast-forward `stable` to it.
+6. Tag `stable` with upstream's version, `vX.Y.Z`, and push the tag. The tag
+   records which upstream release the fork adopted and where its own models
+   stood; `git log --oneline vPREV..vX.Y.Z` is the fork's change list for it.
 
-## Publishing artifacts
+A tag is created once and never moves. If a tag turns out to be wrong, delete it
+before anyone fetches it and cut it again from a corrected `stable`.
 
-Toolboxes' `publish_release.yml` handles the dispatch:
+## Tracking upstream between releases
 
-- **Container images:** builds from the tag and pushes `X.Y.Z`, `X.Y` and
-  `latest`. Rolling images follow `main` as `edge` and `sha-<revision>`.
-- **Windows ZIP:** calls Gufo's reusable `windows-build.yml@main` with the tag
-  as source, sets the version and revision, and checks `gufo.exe --version` and
-  diagnostics with only the bundled runtime on `PATH`. It attaches
-  `gufo-vX.Y.Z-windows-x86_64.zip` and its `.sha256` to the Gufo release. This
-  doesn't run the Windows Devlab GPU checks.
-- **Debian package:** builds `gufo_<version>-1_amd64.deb` for Debian 13,
-  verifies it in a fresh container, and attaches it with its checksum.
+Upstream commits land on `unstable` as they become worth taking, not only at
+release time. Keep each upstream merge as its own commit with upstream's
+subject, so `git log --first-parent` still reads as the fork's history and the
+merges stay separable from fork work.
 
-- **Documentation:** the website's `sync-docs.yml` copies the public docs at
-  the tag into a new version of [gufo.blog/docs](https://gufo.blog/docs),
-  keeping the 10 newest releases, and deploys the site. Between releases,
-  `docs-website.yml` refreshes the site's `development` version whenever a
-  push to `main` changes the public docs.
+`main` does not exist in this repository. Upstream history is reachable through
+the `upstream` remote, and a mirror branch only invited the two to disagree.
 
-Uploading to the Gufo release needs the release GitHub App, installed on Gufo
-with Contents write, through `RELEASE_APP_CLIENT_ID` and
-`RELEASE_APP_PRIVATE_KEY` in Toolboxes. Uploads never overwrite existing
-assets; the workflow's manual inputs rebuild one release, or only its Windows or
-Debian assets, for recovery.
+## Extension API
 
-## Extension API versioning
-
-The extension API is versioned separately and sits outside Gufo's release
-surface: an extension API break alone doesn't need `!`, while a CLI, HTTP or
-public flake break does. The flake's experimental `extensions` argument is
-outside the surface too.
-
-The version is `0.MINOR.REVISION`. A revision only adds; a minor bump may break
-source compatibility. Extensions request a floor within one minor series. After
-1.0, minor bumps are additive and breaking changes bump the major, with an
-adapter for the previous major for at least 60 days where feasible and
-configure-time deprecation reports. Compatibility means rebuilding from source;
-there is no binary ABI promise. Experimental hooks graduate only by explicit
-review after 60 unchanged days. API 1.0 stays gated by the RFC criteria (the
-measured text surface, an external pilot, a pinned external compatibility
-fixture, five additive features and a real 60-day period); no 1.0 claim is made
-today.
-
-**Change records.** Every declaration or contract change in the
-[SURFACE](../../include/gufo/ext/SURFACE) closure (forwarded core and cache
-headers included), the manifest schema or the public CMake contracts needs the
-`ext-api` label and one new, descriptively named record under
-`include/gufo/ext/changes/<major>.<minor>/`, as the
-[record instructions](../../include/gufo/ext/changes/README.md) describe.
-Records are never edited, renamed or removed. In-tree extensions are fixed in
-the same pull request.
-
-**Revision.** [api-series.json](../../include/gufo/ext/api-series.json) sets
-`major`, `minor` and `revision_base`; the revision is `revision_base` plus the
-number of records in the active series, excluding `baseline.md`. CMake
-generates the version header from it, also without Git metadata. Two parallel
-additive pull requests each add a record, and merging both advances the revision
-twice with no shared counter to reconcile. Branch revisions are provisional: an
-extension that needs an unmerged API pins that Gufo revision and picks its floor
-after the merge. A breaking change explicitly advances the series in
-`api-series.json` and adds a record in the new series; that transition is
-reviewed, never inferred.
-
-```sh
-python3 tools/ci/check-extension-api.py --write        # after header or include changes
-python3 tools/ci/check-extension-api.py --changelog /tmp/gufo-extension-api-changes.md
-```
-
-In pull requests, CI runs `check-extension-api.py --base <base-sha> --labels
-<labels>`. Its token check counts inline bodies, initializers and CMake and
-schema statements; comments and whitespace don't trigger it.
-
-## Extension selection in builds
-
-| Build | Selection |
-| --- | --- |
-| `nix build` (`.#default`), CMake presets, Devlab | Discovery: every supported in-tree extension |
-| `.#release`, the release-tag Windows ZIP | `GUFO_EXTENSIONS_FROM_LOCK=ON`: exactly [extensions.lock](../../extensions.lock) |
-| Toolboxes images | The default package with the release version; `gufo.override { extensionsFromLock = true; }` would select the lock |
-
-The lock is an exact name list, family dependencies included, validated in
-every configure. Hosted CPU checks build a real lock-mode executable and reject
-artifact-key, option-name and model-ID collisions between shipped and unshipped
-extensions. They don't establish HIP behavior or performance: when a change
-affects providers, run the functional, numerical and performance gates on the
-shipped lock-mode HIP build as well. [Extension build](extension-build.md)
-describes selection in full.
+The extension API is versioned separately from Gufo and does not follow these
+tags. CMake derives its revision from the active series in
+`include/gufo/ext/api-series.json` plus the count of records under
+`include/gufo/ext/changes/<major>.<minor>/`; a change to a public contract adds a
+record. See [the extension API](../extension-api.md#versions) for what that
+promises.

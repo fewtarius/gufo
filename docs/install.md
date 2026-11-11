@@ -4,6 +4,12 @@ Gufo runs on Linux x86-64 with an AMD Strix Halo GPU (`gfx1151`). This page
 covers the container, the Debian package, Nix, a build from source and the
 Windows ZIP.
 
+This repository is a fork of [gufo-org/gufo](https://github.com/gufo-org/gufo);
+see [FORK.md](../FORK.md). The container image, the Debian package and the
+prebuilt Nix package are upstream's, and they do not contain the models this
+fork adds. To run those, build from a checkout of this repository, either with
+Nix or from source as described below.
+
 ## Prepare the host
 
 Gufo needs a recent kernel and firmware, and access to the GPU devices:
@@ -21,8 +27,9 @@ explains its findings.
 
 ## Container
 
-The `gufo-runtime` image holds Gufo and everything it needs. Use `latest` for
-the newest release, `X.Y.Z` to pin one, or `edge` to follow development.
+The `gufo-runtime` image holds upstream Gufo and everything it needs. Use
+`latest` for the newest release, `X.Y.Z` to pin one, or `edge` to follow
+upstream development.
 
 ```sh
 podman pull ghcr.io/gufo-org/toolboxes/gufo-runtime:latest
@@ -48,7 +55,7 @@ podman run --rm \
 
 ## Debian package
 
-Each release attaches `gufo_<version>-1_amd64.deb` to its
+Each upstream release attaches `gufo_<version>-1_amd64.deb` to its
 [GitHub release](https://github.com/gufo-org/gufo/releases), built for Debian
 13 (trixie) with AMD's ROCm 10.1 packages:
 
@@ -59,9 +66,18 @@ gufo diagnose
 
 ## Nix
 
+Upstream's flake installs upstream's build:
+
 ```sh
 nix profile install github:gufo-org/gufo#release
 gufo diagnose
+```
+
+From a checkout of this repository, `nix build` builds the fork:
+
+```sh
+nix build .#release
+./result/bin/gufo diagnose
 ```
 
 `#release` is the shipped build with the official extensions; the default
@@ -117,10 +133,11 @@ published numbers use the Nix toolchain.
 
 ## Windows
 
-Windows x86-64 is a development target. Each release attaches
+Windows x86-64 is a development target. Each upstream release attaches
 `gufo-vX.Y.Z-windows-x86_64.zip`. Extract the whole ZIP and keep `gufo.exe`
 next to its DLLs and kernel folders. To build it yourself, see
-[building on Windows](../BUILD-WINDOWS.md).
+[building on Windows](../BUILD-WINDOWS.md). The Laguna extension is Linux-only,
+so a Windows build does not include it.
 
 ## Model files
 

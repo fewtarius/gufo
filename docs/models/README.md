@@ -1,8 +1,9 @@
 # Models
 
-These are the official models: the ones Gufo releases build in and the
-maintainers test on AMD Strix Halo. Each page lists the files to download, how
-to run the model and what speed to expect.
+These are the models this repository builds in and the maintainers test on AMD
+Strix Halo. Each page lists the files to download, how to run the model and what
+speed to expect. Laguna S 2.1 and Qwen3.6 35B-A3B are this fork's own additions;
+the rest come from upstream.
 
 <!-- BEGIN GENERATED MODEL TABLE -->
 | Model | Weights / supported inputs | Guide |
@@ -19,9 +20,9 @@ to run the model and what speed to expect.
 | Qwen3.8 Flash-Next | Sharded Q4 GGUF; text/images | [Usage and modes](qwen3.8-flash-next.md) |
 <!-- END GENERATED MODEL TABLE -->
 
-Gufo doesn't ship weights; download them from Hugging Face as each page shows.
-Every speed on these pages was measured on Strix Halo with 128 GB of memory,
-on the date given next to it.
+Gufo doesn't ship weights; download them from Hugging Face as each page shows,
+except Laguna S 2.1, whose weights are not publicly released. Every speed on
+these pages was measured on Strix Halo, on the date given next to it.
 
 Community extensions add other models and variants; see
 [extensions](../extensions.md).

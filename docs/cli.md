@@ -99,7 +99,8 @@ Greedy output is identical to decoding without a draft; sampled output follows
 the same distribution.
 
 - `--speculative`: `off`, or the mode a model offers: `dflash2`
-  ([Qwen3.8 27B](models/qwen3.8-27b.md)), `mtp`
+  ([Qwen3.8 27B](models/qwen3.8-27b.md),
+  [Laguna S 2.1](models/laguna.md)), `mtp`
   ([Qwen3.8 Flash-Next](models/qwen3.8-flash-next.md)), `dspark`
   ([DeepSeek V4 Flash](models/deepseek-v4-flash.md)).
 - `--dflash-model`, `--mtp-model`, `--dspark-model`: the draft file.

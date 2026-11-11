@@ -141,10 +141,14 @@ from the same harness.
 
    ```sh
    python3 tools/bench/model-bench.py --model <model> \
-     --gufo "$PWD/../src/llama-gufo/build/gufo" \
+     --gufo "$PWD/build/release/gufo" \
      --gguf /path/to/model.gguf \
      run --target gufo --table single-ar,loading,memory --context 131072
    ```
+
+   `--gufo` takes any Gufo binary; `result/bin/gufo` and `build/release/gufo`
+   are the two a checkout produces. Pass `--draft`, `--mtp`, `--dspark` or
+   `--mmproj` when a table's variant declares those files.
 
 4. Render: `python3 tools/bench/model-bench.py --model <model> render`.
 

@@ -78,7 +78,7 @@ once:
 | Gufo from | Toolchain |
 | --- | --- |
 | The `gufo-runtime` container | Included; mount a volume at `/home/gufo/.local/share/gufo/extensions` to keep the store, as in [install](install.md#container). |
-| Nix | `nix profile install github:gufo-org/gufo#sdk` (or `#release-sdk`) installs Gufo with its build toolchain. |
+| Nix | `nix profile install github:gufo-org/gufo#sdk` (or `#release-sdk`) installs upstream Gufo with its build toolchain; `nix build .#sdk` does the same from a checkout of this repository. |
 | A source build | The build tree's `sdk`, or `<prefix>/lib/gufo/sdk` after installing, with the same system toolchain. |
 
 `GUFO_SDK_DIR` points Gufo at an SDK elsewhere.
@@ -95,7 +95,7 @@ A flake can build a Gufo with a fixed set of modules:
 
 ```nix
 {
-  inputs.gufo.url = "github:gufo-org/gufo/<revision>";
+  inputs.gufo.url = "github:fewtarius/gufo/<revision>";
   inputs.lfm3 = {
     url = "github:gufo-org/lfm3-gufo-extension/<revision>";
     flake = false;

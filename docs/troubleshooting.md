@@ -99,7 +99,7 @@ jq 'select(.request == "r12")' trace.jsonl
 
 ## Reporting a bug
 
-Open an issue at [gufo-org/gufo](https://github.com/gufo-org/gufo/issues)
+Open an issue at [fewtarius/gufo](https://github.com/fewtarius/gufo/issues)
 with:
 
 - `gufo --version` and `gufo diagnose --json`;

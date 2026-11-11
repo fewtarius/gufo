@@ -115,7 +115,12 @@ def cmd_run(config: BenchConfig, args: argparse.Namespace) -> int:
     gufo_binary = args.gufo if args.gufo.is_absolute() else (root / args.gufo)
     if not gufo_binary.exists():
         raise SystemExit(f"Gufo binary not found: {gufo_binary} (run `nix build`, or on Windows build the windows-release preset)")
-    reference_binary = args.reference_binary or config.data["reference"]["server"]
+    # A Gufo-only page declares no reference, so the reference executable is
+    # only resolved when one is actually going to be launched.
+    reference = config.data.get("reference") or {}
+    reference_binary = args.reference_binary or reference.get("server")
+    if args.target == "reference" and not reference_binary:
+        raise SystemExit(f"{config.model} has no reference server configured")
     revision, dirty = source_identity(root)
     fingerprint = load_fingerprint(None, gufo_binary)
     document = config.benchmarks_path.read_text(encoding="utf-8") if config.benchmarks_path.exists() else ""

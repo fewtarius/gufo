@@ -13,7 +13,7 @@ files that Laguna's presence requires.
 | | |
 |---|---|
 | **Laguna S 2.1** | A MoE text model on gfx1151: 48 layers, hidden 3,072, 8 KV heads of 128, 256 experts with 10 routed plus a shared expert, sliding-window attention of 512 on 3 of every 4 layers. See [docs/models/laguna.md](docs/models/laguna.md). |
-| **Block-sparse attention** | Quest-style block selection on the 12 full-attention layers. A prefill win that grows with depth: +52% at 141k tokens. |
+| **Block-sparse attention** | Quest-style block selection on the 12 full-attention layers, opt-in via `LAGUNA_SPARSE_ATTN`. A prefill win that grows with depth: +52% at 141k tokens. |
 | **DFlash2 speculative decoding** | The drafter predicts a block of tokens from the target's tapped hidden states; each is verified against the target's own logits. |
 | **Native tool calls** | Laguna's `<tool_call>{name}<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` dialect, compiled into the sampler as a grammar and read back by a scanner. |
 | **KV row codec** | A model-agnostic q8_0/q4_0 row codec in `src/core/kv_codec/`, with the contract in [docs/kv-codec.md](docs/kv-codec.md). The Laguna engine and the Qwen runner can store their K/V cache as q8_0. See [Laguna](docs/internal/models/laguna/KV-Q8.md) and [Qwen](docs/internal/models/qwen3.8-27b/KV-Q8.md). |
@@ -31,32 +31,37 @@ files that Laguna's presence requires.
 ## How to build
 
 ```sh
-source ../scripts/env.sh rocm
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
   -DENGINE_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=gfx1151
 cmake --build build --parallel
 ```
 
-Or through the fork's own wrapper, if present, which sets the ROCm paths:
-
-```sh
-../scripts/env.sh rocm
-cmake --build build --parallel
-```
-
-Otherwise use the standard build documented in [docs/internal/development.md](docs/internal/development.md):
+The pinned-toolchain build needs no local ROCm install:
 
 ```sh
 nix build .#release
 ```
 
+Prerequisites, the CMake presets and the rest of the setup are in
+[docs/install.md](docs/install.md#build-from-source) and
+[docs/internal/development.md](docs/internal/development.md).
+
+The maintainer's own workspace sources `../scripts/env.sh rocm` first to put
+ROCm on `PATH` and wraps the server in `../gufo-run.sh`. Neither script is part
+of this repository, so the commands here do not use them.
+
 ## How to run
 
 ```sh
 gufo serve llm --host 0.0.0.0 --port 9090 \
-  --model Laguna-S-2.1-UD-Q4_K_M.gguf \
-  --speculative dflash2 --dflash-model Laguna-S-2.1-DFlash-BF16.gguf -d 2
+  --model models/Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 \
+  --speculative dflash2 \
+  --dflash-model models/Laguna-S-2.1-DFlash-BF16-gufo.gguf --draft-tokens 2
 ```
+
+The weights are three shards; the path is the first one. `-d` is the short form
+of `--draft-tokens` on `gufo serve`; `gufo prompt` has no `-d` and wants the
+long form.
 
 `LAGUNA_KV_CACHE_TYPE=q8_0` stores the attention K/V cache as q8_0 instead of
 F16. See [docs/internal/models/laguna/KV-Q8.md](docs/internal/models/laguna/KV-Q8.md).
@@ -122,14 +127,24 @@ here, which makes this fork's test suite complete where upstream's is not.
 
 ## Keeping up with upstream
 
-Upstream moves fast. The merge base when this fork was created was
-`d0f7c3a0`; upstream is hundreds of commits ahead.
+Upstream moves fast. The fork tracks it through the `upstream` remote; there is
+no `main` branch in this repository, because a local mirror only drifted from
+the remote it was meant to copy.
 
-- Rebase onto `upstream/main` before starting anything that touches shared
-  infrastructure. The Laguna-specific files conflict rarely.
-- The shared-infra edits above are where conflicts land. Keep them as
+```sh
+git fetch upstream
+git switch -c merge/upstream-x.y.z unstable
+git merge upstream/main
+```
+
+- Merge or rebase onto `upstream/main` before starting anything that touches
+  shared infrastructure. The Laguna-specific files conflict rarely.
+- The shared-infra edits listed above are where conflicts land. Keep them as
   separate commits from the Laguna work, so a conflict resolution is a
   reviewable diff rather than a merge.
+- Take `version.txt` and `CHANGELOG.md` from upstream: they describe upstream's
+  release, not the fork's work. [docs/internal/releasing.md](docs/internal/releasing.md)
+  has the full procedure, including the tag that records the adoption.
 - Upstream deleted the NPU stack and refactored the serve layer into
   `src/ext/`. A future upstream refactor of that layer will hit
   `runner_body.inc` and the DFlash executor first.

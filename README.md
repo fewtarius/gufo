@@ -5,15 +5,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gufo-org/gufo/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/gufo-org/gufo?label=release&amp;logo=github&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
-  <a href="https://gufo.blog/docs"><img alt="Documentation" src="https://img.shields.io/badge/docs-gufo.blog-2f5d3a?logo=readthedocs&amp;logoColor=white&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
-  <a href="docs/extension-api.md#versions"><img alt="Extension API series" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgufo-org%2Fgufo%2Fmain%2Finclude%2Fgufo%2Fext%2Fapi-series.json&amp;query=%24.minor&amp;prefix=0.&amp;label=extension%20API&amp;logo=cplusplus&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
+  <a href="https://github.com/gufo-org/gufo/releases/latest"><img alt="Upstream release" src="https://img.shields.io/github/v/release/gufo-org/gufo?label=upstream&amp;logo=github&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
+  <a href="docs/extension-api.md#versions"><img alt="Extension API series" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Ffewtarius%2Fgufo%2Fstable%2Finclude%2Fgufo%2Fext%2Fapi-series.json&amp;query=%24.minor&amp;prefix=0.&amp;label=extension%20API&amp;logo=cplusplus&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/gufo-org/gufo?logo=opensourceinitiative&amp;logoColor=white&amp;style=flat&amp;labelColor=141714&amp;color=2f5d3a"></a>
 </p>
 
 This is the `fewtarius/gufo` fork, which carries the Laguna S 2.1 and
 Qwen3.6 35B-A3B model families alongside the upstream model set. Development
-happens on the `unstable` branch; `main` tracks upstream `gufo-org/gufo`. See
+happens on `unstable`; `stable` is the default branch and what ships. Upstream
+[gufo-org/gufo](https://github.com/gufo-org/gufo) is tracked through the
+`upstream` remote, and its releases set the version this fork follows. See
 [FORK.md](FORK.md) for the fork's scope, what it adds, and how to keep up with
 upstream.
 
@@ -102,8 +103,9 @@ package, Nix, a source build or Windows, see [install](docs/install.md).
 
 ## Documentation
 
-The documentation is on [gufo.blog/docs](https://gufo.blog/docs), one version
-per release, and in [`docs/`](docs/README.md) for the development version.
+The documentation for this fork is in [`docs/`](docs/README.md), and it
+describes the code in this repository. [gufo.blog/docs](https://gufo.blog/docs)
+publishes upstream's documentation and does not cover the fork's models.
 
 - **Get started:** [install](docs/install.md), [models](docs/models/README.md),
   [command line](docs/cli.md), [server API](docs/server.md).

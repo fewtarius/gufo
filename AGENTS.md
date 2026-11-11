@@ -1,11 +1,52 @@
 # AGENTS.md
 
+Rules for people and coding agents working in this repository.
+
+## What this repository is
+
+A fork of [gufo-org/gufo](https://github.com/gufo-org/gufo). Upstream is the
+engine; this fork carries the **Laguna S 2.1** and **Qwen3.6 35B-A3B** model
+families plus the shared infrastructure they need. [FORK.md](FORK.md) lists
+what the fork adds, which upstream files it edits and why, and how the two fit
+together. Read it before touching shared infrastructure.
+
+## Branches
+
+| Branch | Role |
+| --- | --- |
+| `unstable` | Development. Every change lands here first. |
+| `stable` | Default branch, and what ships. Advanced from `unstable` only. |
+| `upstream` remote | `gufo-org/gufo`. The fork tracks it; it has no local branch. |
+
+There is no `main`. Upstream is tracked through the `upstream` remote, never
+through a local branch.
+
+- Branch and open pull requests against `unstable`. `pr-title.yml` and the
+  Windows validation workflow only run on pull requests into `unstable`.
+  Linux validation is gated on upstream's repository and reports itself skipped
+  here, so the model and functional tiers have to be run locally; see
+  [docs/internal/ci.md](docs/internal/ci.md).
+- Advance `stable` by fast-forwarding it to `unstable` once the hosted checks
+  are green. `stable` carries no commits of its own.
+- Rebase onto or merge `upstream/main` before starting anything that touches
+  shared infrastructure. Keep the fork's edits to upstream files in their own
+  commits, so a conflict resolution is a reviewable diff rather than a merge.
+  The files where conflicts land are listed in [FORK.md](FORK.md).
+- Pushing to `origin` is the maintainer's decision. Do not push without asking.
+
 ## Platform and build
 
-Production packages target Linux x86-64 AMD Strix Halo (`gfx1151`); Windows
-is a supported native build target for development. CMake owns
-compiler flags, dependencies and installation; Nix supplies the pinned toolchain.
-Linux source-build prerequisites are in [docs/install.md](docs/install.md#build-from-source).
+Production packages target Linux x86-64 AMD Strix Halo (`gfx1151`); Windows is
+a supported native build target for development. CMake owns compiler flags,
+dependencies and installation; Nix supplies the pinned toolchain. Linux
+source-build prerequisites are in
+[docs/install.md](docs/install.md#build-from-source).
+
+Linking a model extension only on the platform that can build it is the rule
+that keeps Windows green: `src/models/laguna` declares `platforms: ["linux"]`,
+so its targets do not exist in a Windows configure. Guard every reference to a
+model target with `if(TARGET <target>)`, and a test that needs it with the same
+condition, rather than assuming the target is there.
 
 ```sh
 nix build                              # development package, all discovered extensions
@@ -27,7 +68,9 @@ compiler/dependency versions when comparing results.
 ## Focused tests
 
 Formatting and Python repository checks may run on the editing host; they do
-not need the remote GPU. Before committing C++ changes, run the shared CI check:
+not need the remote GPU. Before committing C++ changes, run the shared CI check
+with the pinned toolchain, not the host's `clang-format`: the two versions
+disagree on some constructs and only the pinned one gates.
 
 ```sh
 nix shell --inputs-from . nixpkgs#clang-tools -c python3 tools/ci/check-format.py
@@ -35,10 +78,11 @@ nix shell --inputs-from . nixpkgs#clang-tools -c python3 tools/ci/check-format.p
 ```
 
 Tests selected by `nix flake check` should stay fast and cache-friendly where
-possible. Reuse expensive setup and compiler caches when valid, use the smallest
-deterministic fixtures that preserve the assertions, and avoid redundant builds,
-fixed sleeps and repeated whole-tree work. Measure added wall time; keep expensive
-stress/model qualification explicitly selectable without weakening correctness.
+possible. Reuse expensive setup and compiler caches when valid, use the
+smallest deterministic fixtures that preserve the assertions, and avoid
+redundant builds, fixed sleeps and repeated whole-tree work. Measure added wall
+time; keep expensive stress/model qualification explicitly selectable without
+weakening correctness.
 
 Run the smallest check covering the change. `gpu-test` is RelWithDebInfo with
 assertions enabled. Build only the affected target during iteration:
@@ -51,33 +95,34 @@ nix develop -c ctest --preset gpu-full -R '^<test-name>$' --output-on-failure
 
 The same CMake/CTest commands work outside Nix. `cmake --build --preset pr`
 runs the focused contract subset after configuring `cpu-test`; `nix flake check`
-runs the canonical CPU/repository gate. Full CPU checks,
-sanitisers, GPU/operator/model checks and H3 quality tools remain available
-locally; see [docs/internal/testing.md](docs/internal/testing.md). Do not run full model sweeps,
-video generation or duplicate suites for routine edits. A missing-model skip
-is not a quality pass. Broaden checks when shared behavior changes or failures
-expose risk.
+runs the canonical CPU/repository gate. Full CPU checks, sanitisers,
+GPU/operator/model checks and H3 quality tools remain available locally; see
+[docs/internal/testing.md](docs/internal/testing.md). Do not run full model
+sweeps, video generation or duplicate suites for routine edits. A missing-model
+skip is not a quality pass. Broaden checks when shared behavior changes or
+failures expose risk.
 
-Text API functional/regression tests live in [tests/functional/](tests/functional/README.md).
-Select suites explicitly. Model-specific changes need the affected model/modes;
-use all four profiles only for shared behavior changes. Run correctness on the
-candidate; use main for matched affected timing controls and suspected regressions,
-not a duplicate full correctness run. Reuse baseline evidence only when revision,
-toolchain, harness, model, settings and cache history match. Include `long-context`
-and `cache` for continuation changes; verify loaded mode and actual drafts.
-Correctness and expected prefill/cache work are strict; timings are
-mandatory per request/phase at 5% and 10 ms, never averaged across requests.
-Run once, investigate flags, then alternate main/PR only for affected histories;
-use unchanged-main controls when needed and retain every result. Fix confirmed
+Text API functional/regression tests live in
+[tests/functional/](tests/functional/README.md). Select suites explicitly.
+Model-specific changes need the affected model/modes; use all four profiles
+only for shared behavior changes. Run correctness on the candidate; use main
+for matched affected timing controls and suspected regressions, not a duplicate
+full correctness run. Reuse baseline evidence only when revision, toolchain,
+harness, model, settings and cache history match. Include `long-context` and
+`cache` for continuation changes; verify loaded mode and actual drafts.
+Correctness and expected prefill/cache work are strict; timings are mandatory
+per request/phase at 5% and 10 ms, never averaged across requests. Run once,
+investigate flags, then alternate main/PR only for affected histories; use
+unchanged-main controls when needed and retain every result. Fix confirmed
 regressions before publishing. Noisy evidence stays visibly inconclusive and
 unqualified; do not widen margins or stop at reporting failures. Devlab keeps
 inconclusive timing advisory on both ordinary and release PRs. Use the code
 diff to select affected metrics; unrelated timing variance does not justify
-another full matrix.
-For reported coding-agent loops, also replay the affected workflow with
-`tests/functional/pi_agent.py`; retain its sessions and inspect actual tool results.
-Retain numerical quality tests and the standard speed benchmark. Keep these
-tests in `tests/functional/`, outside hosted model CI; avoid full sweeps.
+another full matrix. For reported coding-agent loops, also replay the affected
+workflow with `tests/functional/pi_agent.py`; retain its sessions and inspect
+actual tool results. Retain numerical quality tests and the standard speed
+benchmark. Keep these tests in `tests/functional/`, outside hosted model CI;
+avoid full sweeps.
 
 ## Profiling and kernels
 
@@ -88,13 +133,31 @@ Use `tools/bench/build.sh` for standalone HIP experiments,
 `tools/prof/isa_mix.py` for instruction analysis. Production paths must retain
 quality; successful optimizations become the default, without extra switches.
 
-## Development
+## Models
 
 - Keep model code, tests, tools and numerical contracts with their model.
-- Follow [docs/AGENTS.md](docs/AGENTS.md) when writing or changing documentation.
+- A throughput table is rendered from an artifact the harness wrote, and says
+  so. `tools/bench/model-bench.py` measures, writes one artifact per table
+  under `docs/internal/models/<model>/artifacts/`, and renders the marked
+  tables in `BENCHMARKS.md`; do not hand-edit between those markers. Numbers
+  from `gufo prompt` and numbers from `gufo serve` measure different things, so
+  a page that mixes them states which one produced each row.
+- Fork-only models live entirely under their own `src/models/<model>/`
+  directory. When a fork model needs a change in an upstream file, keep the
+  change minimal and record it in [FORK.md](FORK.md).
 - Use the shared Qwen control-token constants for framing; see
-  [src/families/qwen/AGENTS.md](src/families/qwen/AGENTS.md). Inspect their definitions
-  when reviewing or changing behavior, and keep reference fixtures independent.
+  [src/families/qwen/AGENTS.md](src/families/qwen/AGENTS.md). Inspect their
+  definitions when reviewing or changing behavior, and keep reference fixtures
+  independent.
+- The K/V row codec contract is [docs/kv-codec.md](docs/kv-codec.md). A model
+  that stores a cache row at a narrower format follows it, and its device path
+  is checked against the host codec byte for byte.
+
+## Development
+
+- Follow [docs/AGENTS.md](docs/AGENTS.md) when writing or changing
+  documentation. Each `CLAUDE.md` is a symlink to the `AGENTS.md` beside it, so
+  editing one edits the other; do not replace a link with a copy.
 - Put Windows-specific code in `src/core/platform/`: one leaf per OS facility
   (files, pages, sockets), whose sources may branch on `_WIN32` or split into
   `<leaf>_posix.cpp`/`<leaf>_windows.cpp` selected in CMake. Outside it and
@@ -103,28 +166,31 @@ quality; successful optimizations become the default, without extra switches.
   counterpart. Never emulate POSIX with macros or copy a file per OS; when the
   logic itself differs, add `<file>_windows.cpp` beside it.
 - Use one canonical long option and backend name per behavior; avoid aliases.
+  A flag that only one subcommand accepts must not appear in another
+  subcommand's documented example.
 - Use `gh` for GitHub operations after checking `gh auth status`.
-- Follow Conventional Commits with a single-line message. Title pull requests
-  according to [the release policy](docs/internal/releasing.md); squash merging retains
-  that title on `main`. Mark breaking changes with `!` in the title, and leave
-  version and changelog updates to the release workflow.
+- Follow Conventional Commits with a single-line message. Pull request titles
+  follow [the release policy](docs/internal/releasing.md), and a squash merge
+  retains that title on `unstable`. Mark breaking changes with `!` in the
+  title, and leave version and changelog updates to whoever cuts the release.
 - Prefer `jj` when available (`jj version`); otherwise use Git.
 - The source extension API is versioned independently from Gufo. Public headers
   under `include/gufo/ext/`, their transitive `SURFACE` closure (including
   forwarded core/cache headers), the metadata schema and public CMake contracts
-  require an `ext-api` PR label and one new, uniquely named Markdown record under
-  `include/gufo/ext/changes/<major>.<minor>/` when declarations/contracts change.
-  Records are permanent and immutable. CMake derives the API revision from the
-  active series in `include/gufo/ext/api-series.json` plus its revision-record
-  count. The `baseline.md` record documents the initial contracts without advancing
-  it. Do not manually bump versions for additive changes.
-  Run `python3 tools/ci/check-extension-api.py --write` after header/include
-  changes; the PR diff gate also checks forwarded declarations. Before 1.0, a minor bump
-  may break extensions; revision bumps are additive. Fix in-tree users together.
-  The guarantee is source compatibility after rebuilding, never binary ABI.
-  Breaking changes explicitly advance the compatibility series in api-series.json
-  and add a record in the new series, retaining all historical records. Extension
-  API and the future experimental flake `extensions` argument are excluded from Gufo's
-  release compatibility surface; CLI/HTTP/public existing flake breaks still
-  require `!`. See [the release policy](docs/internal/releasing.md).
+  require an `ext-api` PR label and one new, uniquely named Markdown record
+  under `include/gufo/ext/changes/<major>.<minor>/` when declarations/contracts
+  change. Records are permanent and immutable. CMake derives the API revision
+  from the active series in `include/gufo/ext/api-series.json` plus its
+  revision-record count. The `baseline.md` record documents the initial
+  contracts without advancing it. Do not manually bump versions for additive
+  changes. Run `python3 tools/ci/check-extension-api.py --write` after
+  header/include changes; the PR diff gate also checks forwarded declarations.
+  Before 1.0, a minor bump may break extensions; revision bumps are additive.
+  Fix in-tree users together. The guarantee is source compatibility after
+  rebuilding, never binary ABI. Breaking changes explicitly advance the
+  compatibility series in api-series.json and add a record in the new series,
+  retaining all historical records. Extension API and the future experimental
+  flake `extensions` argument are excluded from Gufo's release compatibility
+  surface; CLI/HTTP/public existing flake breaks still require `!`. See
+  [the release policy](docs/internal/releasing.md).
 - Follow the user's remote workflow and preserve unrelated work.

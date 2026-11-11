@@ -15,7 +15,8 @@ This page covers the Qwen3.5 and Qwen3.8 families, which share one
 runner and one cache layout: the Qwen3.8 27B and the Qwen3.6 35B-A3B.
 
 ```bash
-QWEN_KV_CACHE_TYPE=q8_0 ./gufo-run.sh --model Qwen3.6-35B-A3B-UD-Q4_K_XL
+QWEN_KV_CACHE_TYPE=q8_0 gufo serve llm --port 8080 \
+  --model models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --context 131072
 ```
 
 F16 is the default. `QWEN_KV_CACHE_TYPE` accepts `f16` or `q8_0` and

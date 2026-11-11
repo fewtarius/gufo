@@ -12,7 +12,8 @@ The codec itself is model-agnostic and lives in `src/core/kv_codec/`; this
 page is about the Laguna side of it.
 
 ```bash
-LAGUNA_KV_CACHE_TYPE=q8_0 ./gufo-run.sh --model Laguna-S-2.1-UD-Q4_K_XL
+LAGUNA_KV_CACHE_TYPE=q8_0 gufo serve llm --port 8080 \
+  --model models/Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 262144
 ```
 
 F16 is the default. `LAGUNA_KV_CACHE_TYPE` accepts `f16` or `q8_0` and
@@ -44,7 +45,10 @@ host codec byte for byte in `tests/models/laguna/kv_q8_test.cpp`.
 
 **Nimo Axis N161** (Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`,
 124.9 GiB RAM visible, 112.5 GiB GPU-visible). Laguna S 2.1 UD-Q4_K_XL,
-56494-token prompt, block-sparse attention on, greedy.
+56494-token prompt, block-sparse attention on, greedy. The instrument is not
+recorded, and the rows predate the 11 November 2026 serve sweep in
+[BENCHMARKS.md](BENCHMARKS.md). Read them as a paired comparison of the two
+cache formats, not as this model's current standalone speed.
 
 | | device memory | prefill tok/s | plain decode tok/s |
 | --- | --- | --- | --- |

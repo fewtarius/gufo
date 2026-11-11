@@ -2,8 +2,16 @@
 
 Mixture of experts. Two weight sets are installed and measured: UD-Q4_K_XL at
 68.35 GiB and UD-Q5_K_XL at 82.02 GiB. Greedy decode, temperature 0, thinking
-off, one session. Measured on Gufo `0e7b3333`. Method and protocol:
+off, one session. Measured on 11 November 2026 on Gufo `0e7b3333`. Method and
+protocol:
 [benchmark methodology](../../benchmarks.md).
+
+Every row is a server request: a 2,048-token prompt against the cached prefix in
+the depth column, 128 generated tokens, one fresh request per repetition, two
+repetitions per row. Speculative decoding is off in these tables, so the
+`draft_n` of every sample is zero. Numbers from `gufo prompt` are a different
+instrument and are not comparable: a full-context prefill reports a higher
+prefill rate for the same weights than a 2,048-token continuation does.
 
 The two weight sets get different cache formats because they need them: Q4 at
 131,072 tokens with F16 K/V, Q5 at 262,144 tokens with q8_0 K/V. Q5 with F16 at

@@ -14,12 +14,21 @@ than carried.
 The two-bank prefill that existed only to hide NPU work behind GPU work went
 with it. The plain prefill path is unchanged.
 
-## Block-sparse attention is on by default
+## Block-sparse attention is opt-in
 
-It is a prefill win that grows with depth: 694.6 tok/s dense to 958.0 tok/s
-sparse at 100,616 tokens (+37.9%), and 633.4 to 965.5 tok/s at 141,211
-(+52%). It is approximate above about 18.5k tokens of context and exact below
-it. `GUFO_SPARSE_ATTN=0` turns it off.
+`LAGUNA_SPARSE_ATTN` is presence-checked, so any value enables it and unset
+leaves it off; the default is off. It is a prefill win that grows with depth:
+694.6 tok/s dense to 958.0 tok/s sparse at 100,616 tokens (+37.9%), and 633.4 to
+965.5 at 141,211 (+52%). It is approximate above about 18.5k tokens of context
+and exact below it, and it applies to prefill only: a single-row decode
+measured 14.9 tok/s dense against 11.6 with it on, because the block scoring is
+paid once per split per K/V head.
+
+Those figures come from `gufo prompt` with the whole document as the prompt, so
+the prefill rate is a full-context pass. The 11 November 2026 tables in
+[BENCHMARKS.md](BENCHMARKS.md) measure a 2,048-token continuation instead and
+report lower prefill rates at the same depth; the gain table here has not been
+re-measured against the current engine.
 
 ## The pooled block bounds travel in the snapshot
 

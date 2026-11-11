@@ -13,30 +13,31 @@
       "gpuDriver": "amdgpu",
       "gpuName": "AMD Radeon 8060S Graphics",
       "gpuPciId": "1002:1586",
-      "kernelRelease": "7.1.8",
-      "memoryTotalBytes": 134309875712,
+      "kernelRelease": "6.18.55-1",
+      "memoryTotalBytes": 134136717312,
       "memoryType": "LPDDR5X (Unified)",
-      "rocmVersion": "7.2.3",
+      "rocmVersion": "10.1.0",
       "schemaVersion": "1.0.0"
     },
-    "fingerprintId": "fe5929d418cfe1f7e3aa4a09199012c1fa064859f1fc762a8cbcda970358f158",
+    "fingerprintId": "bd6bab857eaaf3c40ad0e47a5284c4b3cb5150580c83f1fb1510f53b79bd2786",
     "schemaVersion": "1.0.0"
   },
-  "measuredOn": "2026-10-18",
-  "mode": "mtp",
+  "measuredOn": "2026-11-11",
+  "mode": "ar",
   "model": {
     "id": "Qwen3.8-Flash-Next",
     "variant": null
   },
   "notes": [
-    "file cache reset before each launch with the supplied --drop-caches command",
-    "readiness = HTTP 200 on /ready"
+    "file cache reset before each launch with `echo 3 > /proc/sys/vm/drop_caches`",
+    "readiness = HTTP 200 on /ready",
+    "rows not measured on 2026-11-11 retain values from 2026-10-18"
   ],
-  "referenceName": "llama.cpp",
+  "referenceName": null,
   "rows": {
     "default": {
-      "command": "gufo serve --port 41383 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8 --speculative mtp --mtp-model mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
-      "ready_s": 16.417,
+      "command": "gufo serve --port 53577 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 133760 --served-model-name bench --think off --max-pending-per-client 8",
+      "ready_s": 51.024,
       "ready_s_sd": null,
       "samples": 1
     }
@@ -47,30 +48,26 @@
       "gufo",
       "serve",
       "--port",
-      "41383",
+      "53577",
       "--sessions",
       "1",
       "llm",
       "--model",
       "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
       "--context",
-      "262144",
+      "133760",
       "--served-model-name",
       "bench",
       "--think",
       "off",
       "--max-pending-per-client",
-      "8",
-      "--speculative",
-      "mtp",
-      "--mtp-model",
-      "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
+      "8"
     ]
   },
   "source": {
     "buildMode": "nix-release",
-    "dirty": false,
-    "revision": "fec4759d064585d72f87c6e11af5cfa0e1fa95c7"
+    "dirty": true,
+    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
   },
   "table": "loading",
   "target": "gufo"

@@ -1,0 +1,202 @@
+{
+  "artifactType": "model-bench-table",
+  "fingerprint": {
+    "canonical": {
+      "cppStandard": "C++20",
+      "cpuArchitecture": "x86_64",
+      "cpuLogicalCores": 32,
+      "cpuModel": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+      "cpuPhysicalCores": 16,
+      "cxxCompiler": "GCC 15.3.0",
+      "gpuArchitecture": "gfx1151",
+      "gpuComputeUnits": 20,
+      "gpuDriver": "amdgpu",
+      "gpuName": "AMD Radeon 8060S Graphics",
+      "gpuPciId": "1002:1586",
+      "kernelRelease": "6.18.55-1",
+      "memoryTotalBytes": 134136717312,
+      "memoryType": "LPDDR5X (Unified)",
+      "rocmVersion": "10.1.0",
+      "schemaVersion": "1.0.0"
+    },
+    "fingerprintId": "bd6bab857eaaf3c40ad0e47a5284c4b3cb5150580c83f1fb1510f53b79bd2786",
+    "schemaVersion": "1.0.0"
+  },
+  "measuredOn": "2026-11-11",
+  "mode": null,
+  "model": {
+    "id": "Laguna-S-2.1",
+    "variant": "q4"
+  },
+  "notes": [
+    "pp2048/tg128; depth is a cached conversation prefix of synthetic text (8-token reply); measured turn task is recorded per row; tolerance max(32, 0.500%) on cache_n and prompt_n; actual counts per sample in rows",
+    "synthetic text: 1.191 tokens/word, template overhead 43 tokens"
+  ],
+  "referenceName": null,
+  "rows": {
+    "0": {
+      "command": "gufo serve --port 51839 --sessions 1 llm --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 0,
+          "completion_sha256": "c5718c1bad21c6fad41ab2fd90f52b0c6a561ccdfefac5aa356676e24e1b9747",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2046
+        },
+        {
+          "cache_n": 0,
+          "completion_sha256": "b8569e31adf25214dbb48b867ca3e2dc086e9d519703d3d9def3ca5de968f0f7",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2040
+        }
+      ],
+      "pp": 1183.87,
+      "pp_sd": 1.95,
+      "samples": 2,
+      "tg": 24.69,
+      "tg_sd": 0.22,
+      "workload": "prose"
+    },
+    "32768": {
+      "command": "gufo serve --port 51839 --sessions 1 llm --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 32761,
+          "completion_sha256": "01cd5e906c19b6b2f922f36623a277017b1715266c06d7dfd59cb25b8cbb7fd9",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2028
+        },
+        {
+          "cache_n": 32761,
+          "completion_sha256": "394a5d65b49f06d329502cb7c5cae9c656e55d0f9567a87183543d53daeb894a",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2040
+        }
+      ],
+      "pp": 810.33,
+      "pp_sd": 0.29,
+      "samples": 2,
+      "tg": 21.26,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    },
+    "65536": {
+      "command": "gufo serve --port 51839 --sessions 1 llm --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 65563,
+          "completion_sha256": "c7a53141feab9e46542fc7ad9f266a499d1a46cba67c76171067aa2f86e5b1c5",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2024
+        },
+        {
+          "cache_n": 65520,
+          "completion_sha256": "745a840a013a4f516d8cfe547c531dd9dd04f540057fc50f4e6c6ce1192b185d",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2051
+        }
+      ],
+      "pp": 613.15,
+      "pp_sd": 6.04,
+      "samples": 2,
+      "tg": 18.53,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    },
+    "8192": {
+      "command": "gufo serve --port 51839 --sessions 1 llm --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 8181,
+          "completion_sha256": "f9a1a6628d75c1e6e6a37ad32b103c3e452dd05f491bf8ec411e0f28843c9794",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2030
+        },
+        {
+          "cache_n": 8176,
+          "completion_sha256": "1c965904f2d8911b0c3e3fa3b4245b4decad464f463c9f2b9fba6f26b78a2f2a",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2028
+        }
+      ],
+      "pp": 1059.19,
+      "pp_sd": 0.46,
+      "samples": 2,
+      "tg": 23.9,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    },
+    "98304": {
+      "command": "gufo serve --port 51839 --sessions 1 llm --model Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 98246,
+          "completion_sha256": "2ec2124bb36f9e40ee016c2d61fdc9aa7e67517fffb60c3518f798a5f8f82d1c",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2039
+        },
+        {
+          "cache_n": 98246,
+          "completion_sha256": "aeb6084fad3b89d1a62cc085d796517988cf95e92f4f7146dbd0d7c99176488e",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2021
+        }
+      ],
+      "pp": 489.65,
+      "pp_sd": 1.55,
+      "samples": 2,
+      "tg": 16.35,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    }
+  },
+  "schemaVersion": 1,
+  "server": {
+    "command": [
+      "gufo",
+      "serve",
+      "--port",
+      "51839",
+      "--sessions",
+      "1",
+      "llm",
+      "--model",
+      "Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf",
+      "--context",
+      "131072",
+      "--served-model-name",
+      "bench",
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ]
+  },
+  "source": {
+    "buildMode": "nix-release",
+    "dirty": true,
+    "revision": "743cc4ef60440c472bf0fa5d52f0a2777e1c242c"
+  },
+  "table": "single-ar-q4",
+  "target": "gufo"
+}

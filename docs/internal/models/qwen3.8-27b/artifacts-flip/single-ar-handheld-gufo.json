@@ -1,0 +1,202 @@
+{
+  "artifactType": "model-bench-table",
+  "fingerprint": {
+    "canonical": {
+      "cppStandard": "C++20",
+      "cpuArchitecture": "x86_64",
+      "cpuLogicalCores": 16,
+      "cpuModel": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+      "cpuPhysicalCores": 8,
+      "cxxCompiler": "GCC 15.3.0",
+      "gpuArchitecture": "gfx1103",
+      "gpuComputeUnits": 6,
+      "gpuDriver": "amdgpu",
+      "gpuName": "AMD Radeon 780M Graphics",
+      "gpuPciId": "1002:15BF",
+      "kernelRelease": "6.18.60-1",
+      "memoryTotalBytes": 27064922112,
+      "memoryType": "LPDDR5X (Unified)",
+      "rocmVersion": "10.0.0",
+      "schemaVersion": "1.0.0"
+    },
+    "fingerprintId": "b1da36b3735cf65374b88673dc4f02c1c5a7f7fc1772f9cb8fc673ebfc7b5695",
+    "schemaVersion": "1.0.0"
+  },
+  "measuredOn": "2026-11-11",
+  "mode": null,
+  "model": {
+    "id": "Qwen3.8-27B",
+    "variant": null
+  },
+  "notes": [
+    "pp2048/tg128; depth is a cached conversation prefix of synthetic text (8-token reply); measured turn task is recorded per row; tolerance max(32, 0.500%) on cache_n and prompt_n; actual counts per sample in rows",
+    "synthetic text: 1.161 tokens/word, template overhead 12 tokens"
+  ],
+  "referenceName": null,
+  "rows": {
+    "0": {
+      "command": "gufo serve --port 43525 --sessions 1 llm --model Qwen3.8-27B-UD-Q4_K_XL.gguf --context 32768 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 0,
+          "completion_sha256": "8598185e3acc09cfbaf47849f7a66dd3ced27ea119daffa6ce2ff2648995eb67",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2040
+        },
+        {
+          "cache_n": 0,
+          "completion_sha256": "b12fe866ee720e1bdd1da48ee95d632c197d8f223fc46816fe982698e0747e74",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2032
+        }
+      ],
+      "pp": 113.91,
+      "pp_sd": 0.43,
+      "samples": 2,
+      "tg": 3.79,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    },
+    "16384": {
+      "command": "gufo serve --port 43525 --sessions 1 llm --model Qwen3.8-27B-UD-Q4_K_XL.gguf --context 32768 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 16325,
+          "completion_sha256": "901c29def907359a404f8a02f79a489fa0a44b8519f5aa129431dec0e01d7fbd",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2046
+        },
+        {
+          "cache_n": 16325,
+          "completion_sha256": "be6d83d4a85747fd9df696af281b9353149ef0c7f3a715fa543661eb3f5d0cd8",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2046
+        }
+      ],
+      "pp": 100.39,
+      "pp_sd": 0.06,
+      "samples": 2,
+      "tg": 3.53,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    },
+    "24576": {
+      "command": "gufo serve --port 43525 --sessions 1 llm --model Qwen3.8-27B-UD-Q4_K_XL.gguf --context 32768 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 24530,
+          "completion_sha256": "e0ba51ed22598ae1a04e58f305414bce7de91537e5447adfb924c8c78bbee96f",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2047
+        },
+        {
+          "cache_n": 24530,
+          "completion_sha256": "4537ca03252d474584cc8503331c451f251ac79c99eab7d2ef05fc95f99c3ed1",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2042
+        }
+      ],
+      "pp": 94.34,
+      "pp_sd": 0.14,
+      "samples": 2,
+      "tg": 3.41,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    },
+    "28672": {
+      "command": "gufo serve --port 43525 --sessions 1 llm --model Qwen3.8-27B-UD-Q4_K_XL.gguf --context 32768 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 28649,
+          "completion_sha256": "5ac063575e7a6352461620f2e27a7168ca28a0307bab8d5acf8fd1d7b1339ae4",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2062
+        },
+        {
+          "cache_n": 28649,
+          "completion_sha256": "132d3c28a7875b423a83a692bfaddbfaedb9f430ddc4ac256829095d1c508f43",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2068
+        }
+      ],
+      "pp": 88.46,
+      "pp_sd": 0.1,
+      "samples": 2,
+      "tg": 3.36,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    },
+    "8192": {
+      "command": "gufo serve --port 43525 --sessions 1 llm --model Qwen3.8-27B-UD-Q4_K_XL.gguf --context 32768 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 8185,
+          "completion_sha256": "1faf542faa924fc5cb824e9b263a17a3a934f43c51ca6174e9632cb91ad0207f",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2047
+        },
+        {
+          "cache_n": 8185,
+          "completion_sha256": "bae612997c8cfaae17db42b12c31868bf7308a2f3cb6dcd7d076fd6ea9e5825d",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2054
+        }
+      ],
+      "pp": 107.16,
+      "pp_sd": 0.47,
+      "samples": 2,
+      "tg": 3.65,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    }
+  },
+  "schemaVersion": 1,
+  "server": {
+    "command": [
+      "gufo",
+      "serve",
+      "--port",
+      "43525",
+      "--sessions",
+      "1",
+      "llm",
+      "--model",
+      "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "--context",
+      "32768",
+      "--served-model-name",
+      "bench",
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ]
+  },
+  "source": {
+    "buildMode": "nix-release",
+    "dirty": true,
+    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
+  },
+  "table": "single-ar-handheld",
+  "target": "gufo"
+}

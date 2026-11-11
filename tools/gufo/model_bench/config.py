@@ -117,7 +117,9 @@ class BenchConfig:
                 for variant in self.variants:
                     result.append(TableSpec(f"{base}-{variant}", base, variant, spec))
             else:
-                result.append(TableSpec(base, base, None, spec))
+                # A table may pin one variant when a model's weight sets need
+                # different ladders and so cannot share a per-variant table.
+                result.append(TableSpec(base, base, spec.get("variant"), spec))
         return result
 
     def table(self, table_id: str) -> TableSpec:

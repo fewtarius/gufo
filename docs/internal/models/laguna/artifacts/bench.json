@@ -38,9 +38,9 @@
     "readiness": "/ready"
   },
   "tables": {
-    "single-ar": {
+    "single-ar-q4": {
       "title": "Single user, autoregressive",
-      "per_variant": true,
+      "per_variant": false,
       "prompt_tokens": 2048,
       "output_tokens": 128,
       "depths": [
@@ -58,7 +58,31 @@
       },
       "repetitions": 2,
       "metric": "tok/s",
-      "better": "higher"
+      "better": "higher",
+      "variant": "q4"
+    },
+    "single-ar-q5": {
+      "title": "Single user, autoregressive",
+      "per_variant": false,
+      "prompt_tokens": 2048,
+      "output_tokens": 128,
+      "depths": [
+        0,
+        8192,
+        32768,
+        65536,
+        131072
+      ],
+      "context": 262144,
+      "depth_tolerance": 0.005,
+      "prefix": {
+        "generator": "synthetic-paragraphs",
+        "seed": 1
+      },
+      "repetitions": 2,
+      "metric": "tok/s",
+      "better": "higher",
+      "variant": "q5"
     },
     "loading": {
       "title": "Loading time",
@@ -69,28 +93,6 @@
       "metric": "seconds",
       "better": "lower",
       "rows": "variants"
-    },
-    "memory": {
-      "title": "Memory occupation",
-      "per_variant": false,
-      "context": 131072,
-      "workloads": [
-        {
-          "id": "pp2048 + tg128",
-          "depth": 0,
-          "prompt_tokens": 2048,
-          "output_tokens": 128
-        },
-        {
-          "id": "32K prefix, pp4096 + tg128",
-          "depth": 32768,
-          "prompt_tokens": 4096,
-          "output_tokens": 128
-        }
-      ],
-      "metric": "GiB",
-      "better": "lower",
-      "mode": "ar"
     }
   }
 }

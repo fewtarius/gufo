@@ -1,0 +1,207 @@
+{
+  "artifactType": "model-bench-table",
+  "fingerprint": {
+    "canonical": {
+      "cppStandard": "C++20",
+      "cpuArchitecture": "x86_64",
+      "cpuLogicalCores": 32,
+      "cpuModel": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+      "cpuPhysicalCores": 16,
+      "cxxCompiler": "GCC 15.3.0",
+      "gpuArchitecture": "gfx1151",
+      "gpuComputeUnits": 20,
+      "gpuDriver": "amdgpu",
+      "gpuName": "AMD Radeon 8060S Graphics",
+      "gpuPciId": "1002:1586",
+      "kernelRelease": "6.18.55-1",
+      "memoryTotalBytes": 134136717312,
+      "memoryType": "LPDDR5X (Unified)",
+      "rocmVersion": "10.1.0",
+      "schemaVersion": "1.0.0"
+    },
+    "fingerprintId": "bd6bab857eaaf3c40ad0e47a5284c4b3cb5150580c83f1fb1510f53b79bd2786",
+    "schemaVersion": "1.0.0"
+  },
+  "measuredOn": "2026-11-11",
+  "mode": null,
+  "model": {
+    "id": "Laguna-S-2.1",
+    "variant": "q5"
+  },
+  "notes": [
+    "pp2048/tg128; depth is a cached conversation prefix of synthetic text (8-token reply); measured turn task is recorded per row; tolerance max(32, 0.500%) on cache_n and prompt_n; actual counts per sample in rows",
+    "synthetic text: 1.191 tokens/word, template overhead 43 tokens",
+    "not measured, d8192: serving stream failed: {\"code\": \"generation_failed\", \"message\": \"Laguna prefill failed: Laguna: the forward produced non-finite logits at position 10205 (100352 of 100352 values, first=nan). The GPU reported no error, so the device is still healthy and the model read memory it should not have - usually a KV cache larger than the device can back, or a device that has not settled after the previous server released it. Restart the server and wait about a minute before starting it again; use a smaller context if it keeps happening.\", \"type\": \"server_error\"}",
+    "not measured, d32768: HTTP Error 500: Internal Server Error",
+    "not measured, d65536: HTTP Error 500: Internal Server Error",
+    "not measured, d196608: HTTP Error 500: Internal Server Error",
+    "not measured, d258048: Remote end closed connection without response"
+  ],
+  "referenceName": null,
+  "rows": {
+    "0": {
+      "command": "gufo serve --port 43943 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 0,
+          "completion_sha256": "cda293eab93fba2f3ee153a325181b637207b4fcb3fa6d339dd4f7e195167cbf",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2046
+        },
+        {
+          "cache_n": 0,
+          "completion_sha256": "7f246cf6fb27c6f534130550297fe6ae6931aa019de4fd8746039513c12f4b2a",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2040
+        }
+      ],
+      "pp": 1140.98,
+      "pp_sd": 1.41,
+      "samples": 2,
+      "tg": 22.27,
+      "tg_sd": 0.16,
+      "workload": "prose"
+    },
+    "131072": {
+      "command": "gufo serve --port 43943 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 131065,
+          "completion_sha256": "90905af2673a7add27588b86221b23a6ed49449e9c2cf3bf9a2e353374d5db45",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2016
+        },
+        {
+          "cache_n": 131065,
+          "completion_sha256": "f79af69698831d16e5f529db5907dcd9be26028f833913d1634efb0f42f38759",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2025
+        }
+      ],
+      "pp": 336.64,
+      "pp_sd": 1.9,
+      "samples": 2,
+      "tg": 13.25,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    },
+    "32768": {
+      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 32761,
+          "completion_sha256": "4fffd4842bdb47c93163df624cb312016cad29f15fbe695ac091fcc722aeb49b",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2028
+        },
+        {
+          "cache_n": 32761,
+          "completion_sha256": "6266ad2f9be3297ba7a43bf5a135ebe09e6de136bd52f117068e214f949f121b",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2040
+        }
+      ],
+      "pp": 737.75,
+      "pp_sd": 0.19,
+      "samples": 2,
+      "tg": 19.12,
+      "tg_sd": 0.0,
+      "workload": "prose"
+    },
+    "65536": {
+      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 65563,
+          "completion_sha256": "c94188e09cc6f3ad9bf92228e85bcb3898bec318f3c74184ee8897cd4cc74819",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2024
+        },
+        {
+          "cache_n": 65520,
+          "completion_sha256": "77663b4dd07c59bcab1d9dd7ab481cda368eb3e3b80e431bfc95c3a5c43b9a65",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2051
+        }
+      ],
+      "pp": 532.7,
+      "pp_sd": 0.78,
+      "samples": 2,
+      "tg": 16.67,
+      "tg_sd": 0.01,
+      "workload": "prose"
+    },
+    "8192": {
+      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "counts": [
+        {
+          "cache_n": 8181,
+          "completion_sha256": "d0173d59dfdbaf2d40dbe0a9363891772e6e5671fdb44ce32bf061565bc45755",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2030
+        },
+        {
+          "cache_n": 8176,
+          "completion_sha256": "f2057dab56f1d07dadf4adc2b13a3ea088b4dcc18e695d5ebec159f71aac9fcb",
+          "draft_n": 0,
+          "draft_n_accepted": 0,
+          "predicted_n": 128,
+          "prompt_n": 2028
+        }
+      ],
+      "pp": 1013.25,
+      "pp_sd": 0.04,
+      "samples": 2,
+      "tg": 21.48,
+      "tg_sd": 0.02,
+      "workload": "prose"
+    }
+  },
+  "schemaVersion": 1,
+  "server": {
+    "command": [
+      "gufo",
+      "serve",
+      "--port",
+      "43943",
+      "--sessions",
+      "1",
+      "llm",
+      "--model",
+      "Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf",
+      "--context",
+      "262144",
+      "--served-model-name",
+      "bench",
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ]
+  },
+  "source": {
+    "buildMode": "nix-release",
+    "dirty": true,
+    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
+  },
+  "table": "single-ar-q5",
+  "target": "gufo"
+}

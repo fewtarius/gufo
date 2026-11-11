@@ -1,181 +1,59 @@
 # Laguna S 2.1 benchmarks
 
-Laguna S 2.1 UD-Q4_K_XL and UD-Q5_K_XL, measured on a Nimo Axis N161 (Strix
-Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`, 124.9 GiB RAM visible,
-112.5 GiB GPU-visible).
+Mixture of experts. Two weight sets are installed and measured: UD-Q4_K_XL at
+68.35 GiB and UD-Q5_K_XL at 82.02 GiB. Greedy decode, temperature 0, thinking
+off, one session. Measured on Gufo `0e7b3333`. Method and protocol:
+[benchmark methodology](../../benchmarks.md).
 
-## Protocol
+The two weight sets get different cache formats because they need them: Q4 at
+131,072 tokens with F16 K/V, Q5 at 262,144 tokens with q8_0 K/V. Q5 with F16 at
+262,144 tokens needs more memory than the pool holds. See
+[the K/V cache page](KV-Q8.md) for what the format costs and saves.
 
-Two protocols appear on this page and they are not interchangeable.
+## Nimo Axis N161
 
-- **Serving sweep** (`scratch/kv_sweep.sh`): `gufo serve llm --sessions 1`,
-  temperature 0, 64 generated tokens, one fresh request per row, prompt cache a
-  miss on every row, no speculative decoding. Prompt sizes are whatever the
-  generated prose tokenized to, so they differ slightly between paired runs;
-  both are shown.
-- **Ported-tree** rows: the upstream benchmark driver at `pp2048`, quoted from
-  the port. These are not matched to the serving sweeps.
+Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`, 40 CUs, 124.9 GiB RAM,
+114,688 MiB pool.
 
-A first forward that returns non-finite logits immediately after a previous
-server exited is a device-settling artifact, not a result. Allow about 75
-seconds between back-to-back large loads; see
-[the methodology](../../benchmarks.md#between-run-settling).
+### UD-Q4_K_XL, context 131,072, F16 K/V
 
-## UD-Q4_K_XL at 131072: F16 against q8_0
+<!-- bench:single-ar-q4 -->
+| Laguna S 2.1 Q4 AR<br>Depth (tokens) | pp (tok/s) | tg (tok/s) |
+| ---: | ---: | ---: |
+| 0 | 1183.87 ± 1.95 | 24.69 ± 0.22 |
+| 8,192 | 1059.19 ± 0.46 | 23.90 ± 0.01 |
+| 32,768 | 810.33 ± 0.29 | 21.26 ± 0.01 |
+| 65,536 | 613.15 ± 6.04 | 18.53 ± 0.00 |
+| 98,304 | 489.65 ± 1.55 | 16.35 ± 0.01 |
+<!-- /bench -->
 
-Both runs asked for a 131072-token context. This is the paired A/B for the
-cache format.
+### UD-Q5_K_XL, context 262,144, q8_0 K/V
 
-| Prompt tokens | pp F16 | pp q8_0 | tg F16 | tg q8_0 |
-| ---: | ---: | ---: | ---: | ---: |
-| 5,939 / 6,009 | 1,250.5 | 1,260.2 | 24.4 | 24.0 |
-| 23,707 / 23,986 | 1,168.4 | 1,120.4 | 22.5 | 21.9 |
-| 35,586 / 36,005 | 1,074.0 | 1,011.3 | 21.3 | 20.5 |
-| 47,415 / 47,973 | 1,001.0 | 932.2 | 20.3 | 19.4 |
-| 71,101 / 71,938 | 869.9 | 794.4 | 18.4 | 17.5 |
+The allocation sits at 109,195 MiB of the 114,688 MiB pool, and a filled
+262,144-token context intermittently produces non-finite logits mid-prefill.
+Rows below are the runs that completed; two repetitions per row where they did.
+Treat 131,072 as the deepest prefix measured here, not as the model's limit.
 
-Device at load: F16 90,446 MiB, q8_0 83,563 MiB. **6,883 MiB saved (-7.6%).**
+<!-- bench:single-ar-q5 -->
+| Laguna S 2.1 Q5 AR<br>Depth (tokens) | pp (tok/s) | tg (tok/s) |
+| ---: | ---: | ---: |
+| 0 | 1140.98 ± 1.41 | 22.27 ± 0.16 |
+| 8,192 | 1013.25 ± 0.04 | 21.48 ± 0.02 |
+| 32,768 | 737.75 ± 0.19 | 19.12 ± 0.00 |
+| 65,536 | 532.70 ± 0.78 | 16.67 ± 0.01 |
+| 131,072 | 336.64 ± 1.90 | 13.25 ± 0.01 |
+<!-- /bench -->
 
-q8_0 costs 4 to 9% of prefill and 2 to 5% of decode past 24k. Unlike the Qwen
-family the cost rises smoothly with depth, which is what a dequantized
-attention read should do.
+### Load time
 
-## UD-Q5_K_XL
+<!-- bench:loading -->
+| Laguna S 2.1<br>Target | ready (s) |
+| --- | ---: |
+| Q4 | 58.19 ± 0.54 |
+| Q5 | 93.74 ± 2.31 |
+<!-- /bench -->
 
-This weight set did not load before the session-budget fix. It does now, and it
-is the only Laguna configuration that reaches the model's native context on this
-device.
+## AYANEO Flip KB
 
-Two runs, different contexts:
-
-- F16 at 131072, which is the widest context F16 can hold.
-- q8_0 at 262144, the model's native context.
-
-| Prompt tokens | pp F16 @128k | pp q8_0 @262k | tg F16 @128k | tg q8_0 @262k |
-| ---: | ---: | ---: | ---: | ---: |
-| 6,289 / 6,359 | 1,255.5 | 1,204.1 | 22.3 | 21.9 |
-| 25,102 / 25,381 | 1,159.5 | 1,098.1 | 20.6 | 20.0 |
-| 37,681 / 38,100 | 1,067.7 | 1,003.6 | 19.6 | 18.9 |
-| 50,205 / 50,763 | 987.9 | 917.5 | 18.6 | 17.9 |
-| 75,286 / 76,123 | 858.5 | 778.8 | 16.9 | 16.2 |
-
-Device at load: F16 at 131072 uses 109,963 MiB; q8_0 at **262144** uses
-109,195 MiB. The q8_0 cache doubles the usable context and still lands 768 MiB
-lower than F16 at half of it.
-
-That is the whole reason the pair exists: F16 at 262144 needs 16,968 MiB of KV
-cache plus 7,971 MiB of session scratch against 21,376 MiB free, so it cannot
-reach native context at all. See [KV-Q8.md](KV-Q8.md).
-
-Q5_K_XL costs a few percent against Q4_K_XL at the same context, which is what
-the extra weight fidelity is paid for.
-
-## Ported-tree measurements
-
-Retained from the port, at the upstream driver's `pp2048`. UD-Q4_K_XL,
-262,144-token context, drafter off.
-
-| KV format | Device memory | Prefill tok/s | Plain decode tok/s |
-| --- | --- | --- | --- |
-| F16 | 85,943 MiB | 1,278.2 | 20.7 |
-| q8_0 | 79,895 MiB | - | - |
-
-**-6,048 MiB (-7.0%)** at 262,144 tokens.
-
-The prefill figure is the ported tree's own measurement. It is higher than the
-fork's because the port inherits upstream's newer W8A8 prefill GEMM, which
-splits a launch's tail into a separate kernel instead of widening the main one.
-
-Note the conflict: the paired sweep above shows 6,883 MiB saved at **131072**,
-and this row shows 6,048 MiB saved at **262,144**. A saving proportional to
-context would roughly double between the two. It does not, and that is
-unexplained. Either the ported row's context was not the whole 262,144, or the
-sliding-window ring buffers absorb more of the cache than the layer count
-suggests. Do not quote the larger context's saving until this is re-measured
-against a paired control on one revision.
-
-## Block-sparse attention (ported tree)
-
-UD-Q4_K_XL, block-sparse attention on unless the row says otherwise.
-
-### Prefill
-
-| Prompt tokens | tok/s | Notes |
-| --- | --- | --- |
-| 45,205 | 1,057.6 | block-sparse attention on |
-| 141,170 | 965.6 | block-sparse attention on |
-| 141,211 | 633.4 | dense (block-sparse off) |
-
-Block-sparse attention is a prefill win that grows with depth: the candidate
-pool it prunes grows with position. It is approximate above about 18.5k tokens
-of context - exact below that, because every candidate block fits inside the
-256-block budget.
-
-### Decode
-
-| Context tokens | tok/s | Mode |
-| --- | --- | --- |
-| 45,205 | 26.4 | DFlash2, temperature 0.7, 40% accepted |
-| 45,205 | 24.7 | DFlash2, greedy, 56% accepted |
-| 141,170 | 16.1 | DFlash2, temperature 0.7, 40% accepted |
-| 141,211 | 18.1 | plain decode |
-
-Decode flattens with depth: the sliding-window layers and the FFN/MoE cost
-become a larger share of the step once the split-K attention layers' own cost
-shrinks.
-
-## Speculation rule
-
-`gufo serve` drafts for Laguna on greedy and sampled targets alike. It samples
-the drafter's proposals at the target's temperature and accepts a draft with
-probability `P_target(draft)`, resampling from the residual on a miss. That
-rule is unbiased: for a draft from the drafter's distribution `q` and the
-target's `p`, the published token `z` lands with probability
-`q(z)p(z) + p(z)(1 - q(z)) = p(z)`. It is the same rule the prompt CLI uses.
-
-Measured on the N161 at 141,170 tokens with `temperature=0.7`: 16.1 tok/s with
-40% of drafts accepted, against 14.4 tok/s plain.
-
-Before 2026-11-03 the server refused to draft whenever the request sampled, so
-an agent client that sends a temperature got plain decode and none of the
-DFlash gain. `LAGUNA_DFLASH_DEBUG=1` reports why a step did not draft: the
-injected-context frontier against the session position, the draft budget, and
-whether the request samples.
-
-## Split-K decode attention
-
-Decode flattened substantially at this port (split-K decode attention, ported
-from the Flash-Next/Flint technique): 26 -> 19.8 -> 12.5 tok/s before, and
-26 -> 24.0 -> 20.3 -> 14.8 tok/s after, at comparable depths. Not literally
-flat: sliding-window-layer and FFN/MoE kernel cost becomes a larger share of
-the step once the split non-SWA attention layers' own cost shrinks.
-
-## NPU offload
-
-NPU gain is +0.2% to +2.4% depending on depth. Shared-expert gate/up is a small
-fraction of total per-layer FLOPs for this model's shape (72 query heads), not
-the flat, large win it is for models with fewer heads.
-
-QKV on the NPU is built (cross-layer submit/consume, bank-aware) and measured
-as a net loss for Laguna specifically: the widest layers need 22 NPU round
-trips per layer per bank (9 Q-slices + 1 K + 1 V, x2 for the hi/lo residual
-pass), more than the available hide window absorbs. It stays off by default;
-`LAGUNA_NPU_QKV=1` opts in and is not recommended.
-
-Full investigation, every dead end, and the exact numbers behind each of these:
-[laguna-port-state.md](../../../../src/models/laguna/laguna-port-state.md), a
-historical record of the port process.
-
-## TODO
-
-- Reconcile the q8_0 saving between 131072 and 262144 (above).
-- A DFlash2 sweep at depth with content a drafter accepts well. The measured
-  decode numbers above use filler prose, and DFlash's acceptance is sharply
-  content-dependent.
-- The q8_0 rows are measured with the drafter off. With DFlash2 on, acceptance
-  falls from 57% to 41%, because the drafter predicts from the target's tapped
-  hidden states, which a lossy K/V cache perturbs.
-- Confirm the full-attention layer count. `swa_period` defaults to 4 and is not
-  read from the GGUF, which gives 12 full-attention layers of 48. The cache
-  sizes measured above imply more. Either the default is wrong for this model or
-  the accounting is; the paired sweep is the measurement that would settle it.
+Neither weight set fits the 20,480 MiB pool. Q4 is 68.35 GiB of weights, so it
+cannot be admitted at all, let alone run. Laguna is a Nimo-only model here.

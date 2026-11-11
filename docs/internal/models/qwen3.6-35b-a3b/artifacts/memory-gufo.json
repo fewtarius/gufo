@@ -1,0 +1,77 @@
+{
+  "artifactType": "model-bench-table",
+  "fingerprint": {
+    "canonical": {
+      "cppStandard": "C++20",
+      "cpuArchitecture": "x86_64",
+      "cpuLogicalCores": 32,
+      "cpuModel": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+      "cpuPhysicalCores": 16,
+      "cxxCompiler": "GCC 15.3.0",
+      "gpuArchitecture": "gfx1151",
+      "gpuComputeUnits": 20,
+      "gpuDriver": "amdgpu",
+      "gpuName": "AMD Radeon 8060S Graphics",
+      "gpuPciId": "1002:1586",
+      "kernelRelease": "6.18.55-1",
+      "memoryTotalBytes": 134136717312,
+      "memoryType": "LPDDR5X (Unified)",
+      "rocmVersion": "10.1.0",
+      "schemaVersion": "1.0.0"
+    },
+    "fingerprintId": "bd6bab857eaaf3c40ad0e47a5284c4b3cb5150580c83f1fb1510f53b79bd2786",
+    "schemaVersion": "1.0.0"
+  },
+  "measuredOn": "2026-11-11",
+  "mode": null,
+  "model": {
+    "id": "Qwen3.6-35B-A3B",
+    "variant": null
+  },
+  "notes": [
+    "peak device-global hipMemGetInfo used bytes (total - free), sampled every 250 ms during the request; idle_gib is the same counter before the server started",
+    "server mode: ar"
+  ],
+  "referenceName": null,
+  "rows": {
+    "32K prefix, pp4096 + tg128": {
+      "command": "gufo serve --port 55947 --sessions 1 llm --model Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 29.7,
+      "idle_gib": 0.0
+    },
+    "pp2048 + tg128": {
+      "command": "gufo serve --port 55947 --sessions 1 llm --model Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --context 131072 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 29.32,
+      "idle_gib": 0.0
+    }
+  },
+  "schemaVersion": 1,
+  "server": {
+    "command": [
+      "gufo",
+      "serve",
+      "--port",
+      "55947",
+      "--sessions",
+      "1",
+      "llm",
+      "--model",
+      "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+      "--context",
+      "131072",
+      "--served-model-name",
+      "bench",
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ]
+  },
+  "source": {
+    "buildMode": "nix-release",
+    "dirty": true,
+    "revision": "2e8007aefe2b5fd220a5e7f4e13718cfac1d2d33"
+  },
+  "table": "memory",
+  "target": "gufo"
+}

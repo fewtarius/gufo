@@ -1,0 +1,77 @@
+{
+  "artifactType": "model-bench-table",
+  "fingerprint": {
+    "canonical": {
+      "cppStandard": "C++20",
+      "cpuArchitecture": "x86_64",
+      "cpuLogicalCores": 16,
+      "cpuModel": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+      "cpuPhysicalCores": 8,
+      "cxxCompiler": "GCC 15.3.0",
+      "gpuArchitecture": "gfx1103",
+      "gpuComputeUnits": 6,
+      "gpuDriver": "amdgpu",
+      "gpuName": "AMD Radeon 780M Graphics",
+      "gpuPciId": "1002:15BF",
+      "kernelRelease": "6.18.60-1",
+      "memoryTotalBytes": 27064922112,
+      "memoryType": "LPDDR5X (Unified)",
+      "rocmVersion": "10.0.0",
+      "schemaVersion": "1.0.0"
+    },
+    "fingerprintId": "b1da36b3735cf65374b88673dc4f02c1c5a7f7fc1772f9cb8fc673ebfc7b5695",
+    "schemaVersion": "1.0.0"
+  },
+  "measuredOn": "2026-11-11",
+  "mode": null,
+  "model": {
+    "id": "Qwen3.6-35B-A3B",
+    "variant": null
+  },
+  "notes": [
+    "peak device-global hipMemGetInfo used bytes (total - free), sampled every 250 ms during the request; idle_gib is the same counter before the server started",
+    "server mode: ar"
+  ],
+  "referenceName": null,
+  "rows": {
+    "32K prefix, pp4096 + tg128": {
+      "command": "gufo serve --port 51981 --sessions 1 llm --model Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --context 49152 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 19.63,
+      "idle_gib": 0.0
+    },
+    "pp2048 + tg128": {
+      "command": "gufo serve --port 51981 --sessions 1 llm --model Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --context 49152 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 19.63,
+      "idle_gib": 0.0
+    }
+  },
+  "schemaVersion": 1,
+  "server": {
+    "command": [
+      "gufo",
+      "serve",
+      "--port",
+      "51981",
+      "--sessions",
+      "1",
+      "llm",
+      "--model",
+      "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+      "--context",
+      "49152",
+      "--served-model-name",
+      "bench",
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ]
+  },
+  "source": {
+    "buildMode": "nix-release",
+    "dirty": true,
+    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
+  },
+  "table": "memory-handheld",
+  "target": "gufo"
+}

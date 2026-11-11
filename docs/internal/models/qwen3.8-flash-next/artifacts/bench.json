@@ -43,25 +43,24 @@
         8192,
         32768,
         65536,
-        131072,
-        196608
+        131072
       ],
-      "context": 262144,
+      "context": 133760,
       "depth_tolerance": 0.005,
       "prefix": {
         "generator": "synthetic-paragraphs",
         "seed": 1
       },
-      "repetitions": 2,
+      "repetitions": 1,
       "metric": "tok/s",
       "better": "higher"
     },
     "loading": {
       "title": "Loading time",
       "per_variant": false,
-      "context": 262144,
+      "context": 133760,
       "sessions": 1,
-      "repetitions": 2,
+      "repetitions": 1,
       "metric": "seconds",
       "better": "lower",
       "rows": "variants"
@@ -69,7 +68,7 @@
     "memory": {
       "title": "Memory occupation",
       "per_variant": false,
-      "context": 262144,
+      "context": 133760,
       "workloads": [
         {
           "id": "pp2048 + tg128",

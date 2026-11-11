@@ -13,16 +13,16 @@
       "gpuDriver": "amdgpu",
       "gpuName": "AMD Radeon 8060S Graphics",
       "gpuPciId": "1002:1586",
-      "kernelRelease": "7.1.8",
-      "memoryTotalBytes": 134309875712,
+      "kernelRelease": "6.18.55-1",
+      "memoryTotalBytes": 134136717312,
       "memoryType": "LPDDR5X (Unified)",
-      "rocmVersion": "7.2.3",
+      "rocmVersion": "10.1.0",
       "schemaVersion": "1.0.0"
     },
-    "fingerprintId": "fe5929d418cfe1f7e3aa4a09199012c1fa064859f1fc762a8cbcda970358f158",
+    "fingerprintId": "bd6bab857eaaf3c40ad0e47a5284c4b3cb5150580c83f1fb1510f53b79bd2786",
     "schemaVersion": "1.0.0"
   },
-  "measuredOn": "2026-10-18",
+  "measuredOn": "2026-11-11",
   "mode": null,
   "model": {
     "id": "Qwen3.8-Flash-Next",
@@ -30,19 +30,25 @@
   },
   "notes": [
     "peak device-global hipMemGetInfo used bytes (total - free), sampled every 250 ms during the request; idle_gib is the same counter before the server started",
-    "server mode: ar"
+    "server mode: ar",
+    "rows not measured on 2026-11-11 retain values from 2026-10-18"
   ],
-  "referenceName": "llama.cpp",
+  "referenceName": null,
   "rows": {
     "16K prefix, pp4096 + tg128": {
       "command": "gufo serve --port 60073 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 133121 --served-model-name bench --think off --max-pending-per-client 8",
       "gib": 90.53,
       "idle_gib": 2.38
     },
+    "32K prefix, pp4096 + tg128": {
+      "command": "gufo serve --port 42857 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 85.64,
+      "idle_gib": 0.0
+    },
     "pp2048 + tg128": {
-      "command": "gufo serve --port 60073 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 133121 --served-model-name bench --think off --max-pending-per-client 8",
-      "gib": 88.78,
-      "idle_gib": 2.38
+      "command": "gufo serve --port 42857 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "gib": 85.51,
+      "idle_gib": 0.0
     }
   },
   "schemaVersion": 1,
@@ -51,14 +57,14 @@
       "gufo",
       "serve",
       "--port",
-      "60073",
+      "42857",
       "--sessions",
       "1",
       "llm",
       "--model",
       "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
       "--context",
-      "133121",
+      "262144",
       "--served-model-name",
       "bench",
       "--think",
@@ -69,8 +75,8 @@
   },
   "source": {
     "buildMode": "nix-release",
-    "dirty": false,
-    "revision": "fec4759d064585d72f87c6e11af5cfa0e1fa95c7"
+    "dirty": true,
+    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
   },
   "table": "memory",
   "target": "gufo"

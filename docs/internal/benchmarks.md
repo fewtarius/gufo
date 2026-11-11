@@ -1,227 +1,155 @@
 # Benchmark methodology
 
-How benchmark numbers are produced, compared and retained. The public summary
-is [benchmarks](../benchmarks.md). Measure release binaries (`nix build`, then
-`result/bin`). Per-model results and qualification gaps live in:
+How every number under `docs/internal/models/` is produced. Each per-model page
+renders its tables from measurement artifacts, so a figure on a page always has
+a JSON file behind it.
 
-- [Laguna S 2.1](models/laguna/BENCHMARKS.md)
-- [Qwen3.6-35B-A3B](models/qwen3.6-35b-a3b/BENCHMARKS.md)
+## Gufo is compared against itself
 
-- [DeepSeek V4 Flash](models/deepseek-v4-flash/BENCHMARKS.md)
-- [EmbeddingGemma 2](models/embeddinggemma-2/BENCHMARKS.md)
-- [MiniMax H3](models/minimax-h3/BENCHMARKS.md)
-- [Qwen-Image-2.1](models/qwen-image-2.1/BENCHMARKS.md)
-- [Qwen3.8 27B](models/qwen3.8-27b/BENCHMARKS.md)
-- [Qwen3.8 Flash-Next](models/qwen3.8-flash-next/BENCHMARKS.md)
-- [Qwen3-ASR](models/qwen3-asr/BENCHMARKS.md)
-- [Qwen3-TTS](models/qwen3-tts/BENCHMARKS.md)
+These pages report Gufo throughput, not Gufo against another engine. A
+comparison table has to be re-measured whenever either engine changes, and the
+reference build has to be kept in step by hand. That cost buys a number nobody
+acts on, so the pages carry Gufo's own results and the release the results
+describe.
 
-## Coverage by device
+A `bench.json` with no `reference` entry renders Gufo columns only. The renderer
+drops the reference, gain and exactness columns instead of filling them with
+placeholders. Add a `reference` entry to a config if a comparison is ever wanted
+back for one model.
 
-Which models have measured results on which device. "Does not fit" means the
-weights alone exceed the device's GPU-visible pool, so no context makes it
-usable there. A device is named by its product and APU, so a result can be
-matched to hardware without knowing which machine it ran on.
+## Harness
 
-| | Nimo Axis N161 | AYANEO FLIP KB |
+`tools/bench/model-bench.py` measures a model's tables over HTTP, writes one
+artifact per table and target under `docs/internal/models/<model>/artifacts/`,
+and renders the tables between the `<!-- bench:<id> -->` markers in
+`BENCHMARKS.md`. The `run` subcommand measures, `render` rewrites the page from
+the artifacts it finds, and `tables` lists what a config declares.
+
+Workloads live in `docs/internal/models/<model>/artifacts/bench.json`:
+
+- `variants` names each weight set the page covers.
+- `tables` declares the sweeps, their contexts and their depths.
+- `gufo.llm` carries the server arguments a measurement uses, so a run does not
+  depend on a shell alias.
+
+The harness prints the server command it launched into the artifact, with the
+model path reduced to a basename. Re-running a render without re-measuring
+leaves the numbers alone.
+
+## Protocol
+
+Every throughput row comes from the same shape of request:
+
+- `gufo serve llm`, one session, `/v1/chat/completions`
+- temperature 0, fixed seed, thinking off
+- 2,048 new prompt tokens, 128 generated tokens
+- one fresh request per repetition, prompt cache a miss on each
+- `prefill_tps` and `decode_tps` taken from the server's own completed-request
+  log line, not from client wall time
+- two repetitions per row, reported as mean ± standard deviation
+
+Depth is the length of the cached prefix a row is measured against. It is
+separate from the 2,048 new tokens: depth says how much context the attention
+has to read, the prompt says how much work the pass does.
+
+Prompts come from the harness's `synthetic-paragraphs` generator, which builds
+random sentences of varying length from a fixed vocabulary and a fixed seed.
+Consecutive prompts share no prefix. A generator that pads by repeating one
+sentence is not usable here: repetition engages prompt-lookup paths and inflates
+decode, and both engines cache a repeated prefix, so the measured rate
+describes the new tail only.
+
+## Devices
+
+A result names the device by its hardware so it can be matched without knowing
+which machine produced it.
+
+| | Nimo Axis N161 | AYANEO Flip KB |
 | --- | --- | --- |
 | APU | Ryzen AI Max+ 395 | Ryzen 7 7840U |
 | GPU | Radeon 8060S, `gfx1151`, 40 CUs | Radeon 780M, `gfx1103`, 8 CUs |
-| RAM visible to the OS | 124.9 GiB | 25.2 GiB |
-| GPU-visible pool | 112.5 GiB (512 MiB carveout + 112 GiB GTT) | 26 GiB (6 GiB carveout + 20 GiB GTT) |
+| RAM seen by the OS | 124.9 GiB | 25.2 GiB |
+| Firmware VRAM carveout | 512 MiB | 6,144 MiB |
+| GTT window | 114,688 MiB | 20,480 MiB |
+| Pool HIP reports to a loader | 114,688 MiB | 20,480 MiB |
 
-| Model | Nimo Axis N161 | AYANEO FLIP KB |
-| --- | --- | --- |
-| Laguna S 2.1 UD-Q4_K_XL (68.35 GiB) | measured, 128k | does not fit |
-| Laguna S 2.1 UD-Q5_K_XL (82.02 GiB) | measured, 128k F16 / native 262k q8_0 | does not fit |
-| Qwen3.6-35B-A3B UD-Q4_K_XL (21.28 GiB) | measured, 128k | measured, 128k q8_0 |
-| Qwen3.8-27B UD-Q4_K_XL (16.35 GiB) | measured, up to 131k | spills to host, 3.8 tok/s |
-| Qwen3.8-Flash-Next UD-Q4_K_XL (103.7 GiB) | measured, AR and MTP | does not fit |
-| DeepSeek V4 Flash, MiniMax H3, Qwen-Image-2.1, EmbeddingGemma 2, Qwen3-ASR, Qwen3-TTS | see each model page | not run |
+Both are unified-memory parts, so device memory and system RAM are the same
+DRAM reached two ways. The pool a loader sees and that `mem_info_gtt_total`
+reports is the GTT window; the firmware carveout is a separate, small
+reservation. A model larger than the whole pool can be admitted and then read
+pages that are not backed, which surfaces as non-finite logits rather than an
+allocation error.
 
-Peak device memory at the tested context, for the rows above:
-
-| Model | Device | Context | K/V | Peak device | Pool |
-| --- | --- | ---: | --- | ---: | ---: |
-| Laguna S 2.1 Q4 | Nimo Axis N161 | 131,072 | F16 | 90,446 MiB | 115,200 MiB |
-| Laguna S 2.1 Q4 | Nimo Axis N161 | 131,072 | q8_0 | 83,563 MiB | 115,200 MiB |
-| Laguna S 2.1 Q5 | Nimo Axis N161 | 131,072 | F16 | 109,963 MiB | 115,200 MiB |
-| Laguna S 2.1 Q5 | Nimo Axis N161 | 262,144 | q8_0 | 109,195 MiB | 115,200 MiB |
-| Qwen3.6-35B-A3B | Nimo Axis N161 | 131,072 | F16 | 29,928 MiB | 115,200 MiB |
-| Qwen3.6-35B-A3B | Nimo Axis N161 | 131,072 | q8_0 | 28,728 MiB | 115,200 MiB |
-| Qwen3.6-35B-A3B | AYANEO FLIP KB | 131,072 | q8_0 | 26,351 MiB | 26,624 MiB |
-| Qwen3.8-Flash-Next | Nimo Axis N161 | 133,121 | F16 | 84,774 MiB AR / 88,931 MiB MTP | 115,200 MiB |
-
-Two rows are at the edge. Laguna Q5 with q8_0 fills 95% of the Nimo pool at
-native context, which is why the cache format is what makes that context
-reachable. Qwen3.6 on the FLIP KB uses 99% of the pool at 128k, so any larger
-context needs the format change, not a tuning change.
-
-Both machines are unified-memory parts, so "device memory" and "system RAM" are
-the same DRAM reached two ways. The kernel's GTT window is the pool a loader
-sees and what `mem_info_gtt_total` reports; the BIOS carveout is a separate,
-small reservation. A model larger than the whole pool can be admitted and then
-read unbacked pages, which surfaces as non-finite logits rather than an
-allocation error - which is why the loaders carry budget checks.
+Each device measures its own depth ladder, because the pool bounds the context
+each one can hold. The handheld tables (`single-ar-handheld` and its loading and
+memory companions) use the contexts and depths the 20 GiB pool supports. A page
+carries both devices by naming an artifact directory in the marker:
+`<!-- bench:single-ar@artifacts-flip -->` renders the handheld measurement of
+the same table.
 
 ## Between-run settling
 
 Loading a model that occupies most of the pool, then immediately loading
 another, can produce non-finite logits on the first forward even when the second
-configuration fits. The kernel needs roughly a minute to reclaim the previous
-process's pages. Measured repeatedly on the Nimo Axis N161: a run that failed
-this way passed unchanged after a wait.
+configuration fits. The kernel needs time to reclaim the previous process's
+pages.
 
-Allow about 75 seconds between back-to-back large loads, and treat a
-first-forward NaN right after a previous server exited as a device state, not a
-result, until it reproduces after the wait.
+Measured on the Nimo Axis N161: Laguna S 2.1 UD-Q5_K_XL at 262,144 tokens with
+q8_0 K/V failed at position 1 when started 70 seconds after Laguna UD-Q4_K_XL
+released 90 GiB, then loaded unchanged after a longer wait and used 109,195 MiB
+of the 114,688 MiB pool. The failure is a device state, not a result.
 
+Space consecutive large loads by 150 seconds on the Nimo and 90 on the handheld.
+Treat a first-forward NaN right after a previous server exited as unsettled
+until it reproduces after the wait.
 
-## Model benchmark driver
+## Coverage
 
-`tools/bench/model-bench.py` measures the tables of a model's `BENCHMARKS.md`
-over HTTP for Gufo and for the reference project of its category (llama.cpp
-for Qwen; antirez/ds4 for DeepSeek), writes per-table artifacts, and renders the tables
-and SVG charts between the `<!-- bench:<id> -->` markers. Workloads and table
-layouts are declared in `docs/internal/models/<model>/artifacts/bench.json`; the
-`benchmark-model` skill in `.agents/skills` describes the procedure.
+Which model has measured results on which device. A device that cannot hold a
+model is recorded as such rather than left blank.
 
-Reference runtimes are explicitly selected Nix packages, excluded from Gufo,
-the normal development shell and hosted checks:
-
-| Reference | Package | Executable |
+| Model | Nimo Axis N161 | AYANEO Flip KB |
 | --- | --- | --- |
-| Qwen AR / DFlash2 | `.#llama-cpp-reference` | `llama-server` |
-| Flash-Next MTP | `.#llama-cpp-mtp-reference` | `llama-server-mtp` |
-| DeepSeek AR / DSpark | `.#ds4-reference` | `ds4-server`, `ds4-bench` |
+| Qwen3.6-35B-A3B UD-Q4_K_XL | measured | measured, q8_0 K/V |
+| Qwen3.8-27B UD-Q4_K_XL | measured | measured, q8_0 K/V |
+| Qwen3.8-Flash-Next UD-Q4_K_XL | measured | not present |
+| Laguna S 2.1 UD-Q4_K_XL | measured | not present |
+| Laguna S 2.1 UD-Q5_K_XL | measured, q8_0 K/V | not present |
 
-For example, enter the development shell and add only the needed baseline:
+The other model pages describe models whose weights are not installed on either
+device. They carry identity and method only. Measure one and its tables fill in
+from the same harness.
 
-```sh
-nix develop
-nix shell .#llama-cpp-reference .#llama-cpp-mtp-reference
-python3 tools/bench/model-bench.py --model qwen3.8-flash-next --gguf "$MODEL" \
-  --mtp "$MTP" run --target reference --table single-mtp
-```
+## Adding a model
 
-DeepSeek's HTTP payload omits pp/tg durations. The driver reads the pinned
-server's existing stage timers from its log and checks them against HTTP token
-counts. Native `ds4-bench` also supports single-session AR/DSpark, but not
-concurrency. The pinned ROCm server disables DSpark when batching, so C>1
-DSpark comparisons are **N/A**. See the
-[DS4 method](models/deepseek-v4-flash/QUALITY.md#benchmark-method).
+1. Write `docs/internal/models/<model>/artifacts/bench.json`. Copy an existing
+   config and change `model`, `files`, `variants` and `tables`. Leave out
+   `reference` to keep the page Gufo-only.
+2. Add `<!-- bench:<table-id> -->` and `<!-- /bench -->` markers to
+   `BENCHMARKS.md` where each table belongs. Use
+   `<!-- bench:<table-id>@artifacts-flip -->` for a second device.
+3. Measure, from the gufo tree:
 
-New or refreshed text-model cards use the same pp2048 prose/copying prompts
-for single-user d0 and concurrency, with tg128. The driver shares their prompt
-generator and records prompt hashes. C1 should cross-check d0; investigate
-input, cache, controller and timing differences before attributing a gap to
-batching. Short repeated-word corpora remain useful quality probes, but their
-rates cannot replace these matched workloads.
+   ```sh
+   python3 tools/bench/model-bench.py --model <model> \
+     --gufo "$PWD/../src/llama-gufo/build/gufo" \
+     --gguf /path/to/model.gguf \
+     run --target gufo --table single-ar,loading,memory --context 131072
+   ```
 
-For decode comparisons, set `prefill_first: true` in the concurrency table.
-Prepare every session with the full prompt and one output token, wait for all
-preparations, then time identical tg128 requests with prefix reuse. The driver
-pins llama.cpp slots and rejects replay exceeding four prompt tokens. This keeps
-peers' long prefills outside llama.cpp's elapsed generation timer; Gufo reports
-active decode time. Preserve a separate fresh AR completion-hash control.
+4. Render: `python3 tools/bench/model-bench.py --model <model> render`.
 
-## Direct and serving measurements
+Paths given to `--gufo`, `--log-dir` and `--artifacts-dir` are resolved against
+the gufo tree when relative, so pass absolute paths when running from elsewhere.
 
-`gufo bench` measures the model path. Keep model artifact, prompt length,
-generation length, context depth, speculative mode, and sampling controls
-fixed when comparing runs. `pp2048` means 2,048 new prompt tokens; context
-depth is separate from the amount of new prefill work.
+## Reading a table
 
-`tools/serving/gufo-serving-bench.py` measures HTTP serving with synchronized
-requests. It distinguishes server-stage prefill/decode throughput, scheduler
-and client TTFT, token ITL, whole-request throughput, and aggregate concurrency
-throughput. C1 serving and a direct single-user benchmark are comparable only
-when prompt, cache state, sampling, speculation, and timed scope match.
+`pp` is prompt-processing throughput in tok/s: how fast a new prompt is
+consumed. `tg` is token generation in tok/s: how fast output is produced. Depth
+is the cached prefix the row ran against.
 
-Model tables report the **sum of individual request decode rates** in each
-concurrent group, averaged across measured groups. Prefill and queue time
-remain in the latency diagnostics. Pending measurements are **TODO**;
-comparisons prevented by missing reference features are **N/A**, with a reason.
-Whole-request throughput is not a substitute for decode timings.
-
-`--endpoint-profile openai` supports other OpenAI-compatible servers. Missing
-server-stage metrics remain null. `--reference-report` compares completion
-hashes against an existing C1 reference; category filters select a focused
-subset. Qualify acceptance with a fresh server so prompt-cache hits do not
-hide work. See [serving benchmark commands](performance.md) for invocation.
-
-`tools/bench/speculative-corpus.py` compares direct autoregressive and
-speculative token traces. Request correctness, acceptance, and end-to-end
-speed are separate requirements.
-
-## Quality method (matched-token, per position)
-
-Use the independent references and model-owned limits described in
-[testing](testing.md). Tokenize once and feed teacher and candidate the same
-predetermined history. Compare full next-token distributions before appending
-the next evaluation token. Free-running text cannot isolate numerical error
-after the first differing choice.
-
-```text
-p_t = softmax(teacher_logits)
-p_c = softmax(candidate_logits)
-KL  = sum_v p_t[v] * (log p_t[v] - log p_c[v])
-NLL = -log(p_c[target_token])
-```
-
-Record non-finite counts, normalized-logit error, KL, teacher-token
-NLL/perplexity, top-1 agreement, and top-k overlap as applicable. Aggregates
-are over scored positions. A changed tokenizer, template, suite, or history
-changes the comparison identity.
-
-Capability evaluation is separate: [gufo eval](../cli.md#measuring) grades free-running
-answers through the OpenAI-compatible server.
-
-## Focused kernel measurements
-
-Build development tools with `cmake --preset gpu-test` and
-`cmake --build --preset gpu-test --target gufo-kernel-bench tune_hipblaslt`.
-They are omitted from the production package.
-
-`gufo-kernel-bench` exercises production HIP entry points without loading a
-model. Correctness sentinels run outside the timed interval:
-
-```sh
-./build/gpu-test/gufo-kernel-bench --help
-./build/gpu-test/gufo-kernel-bench \
-  --case decode-attention --context 4096,8192,12288,16384 \
-  --warmup 5 --repetitions 30 --json
-```
-
-Standalone microbenchmarks under `tools/bench` and model-specific tool folders
-report component correctness alongside timing. Their numbers do not replace
-end-to-end model measurements. Collect profiler traces separately and use
-[the performance guide](performance.md) to identify the limiting operation.
-
-## Reporting and artifact retention
-
-Record model/engine revisions, artifact hashes, hardware/software fingerprint,
-power profile and CPU/GPU temperatures, input identity, context, output count,
-sampling, concurrency, cache state, oracle identity, and the exact timed scope.
-A numerical mismatch or device failure is not a passing result. Add repetitions
-when timing noise or a suspected regression requires them.
-
-Checked-in JSON retains fixtures, model provenance, controller calibration,
-and bounded result summaries. Serving summaries preserve aggregate metrics,
-per-case completion hashes, and the original report digest. Raw samples,
-profiler traces, generated tuning databases, and full-logit captures stay in
-ignored `artifacts/`, except for independent reference data needed by a
-maintained correctness test.
-
-Serving reports exclude endpoint hosts, prompts, generated text, model paths,
-raw token IDs, and timestamps. The canonical machine fingerprint excludes
-hostnames, usernames, secrets, timestamps, and private paths.
-`gufo diagnose --validate-artifact` validates its supported diagnostic schema;
-each model/tool owns the validation of its own result schema.
-
-Downloaded tokenizer files and `.direnv` shell state are local artifacts.
-Count tracked source, including HIP translation units, with:
-
-```sh
-nix run nixpkgs#cloc -- --vcs=git --force-lang=C++,hip
-```
+Decode is bandwidth bound. It reads every active weight once per token, so it
+falls slowly with depth and barely moves when the batch or the cache format
+changes. Prefill is compute bound, so it is what batch, ubatch and cache format
+actually move. A large decode swing between two runs of the same model points at
+a different configuration or an unstable device, not at tuning.

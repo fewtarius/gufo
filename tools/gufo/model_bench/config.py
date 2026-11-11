@@ -129,8 +129,20 @@ class BenchConfig:
     def variant_label(self, variant: str) -> str:
         return self.variants[variant]["label"]
 
+    def _resolve_variant(self, variant: str | None) -> str:
+        """A table without a variant measures the model's only variant.
+
+        A config may name its single variant anything (q4 for a page that once
+        carried two), so falling back to the literal "default" raises for it.
+        """
+        if variant:
+            return variant
+        if len(self.variants) == 1:
+            return next(iter(self.variants))
+        return "default"
+
     def file(self, role: str, variant: str | None) -> Path:
-        variant = variant or "default"
+        variant = self._resolve_variant(variant)
         by_variant = self.files.get(role, {})
         path = by_variant.get(variant) or by_variant.get("*")
         if path is None:
@@ -141,7 +153,8 @@ class BenchConfig:
         return path
 
     def require_files(self, variant: str | None) -> None:
-        for role in self.variants[variant or "default"].get("requires", []):
+        variant = self._resolve_variant(variant)
+        for role in self.variants[variant].get("requires", []):
             self.file(role, variant)
 
 

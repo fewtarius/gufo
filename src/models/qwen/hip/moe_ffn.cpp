@@ -7,8 +7,8 @@
 #include <cstdlib>
 #include <stdexcept>
 
-#include "gufo/ext/experimental/hip_utils.hpp"
 #include "gufo/ext/experimental/hip_profile.hpp"
+#include "gufo/ext/experimental/hip_utils.hpp"
 #include "src/families/qwen/kernels/ops/gemm.hpp"
 #include "src/families/qwen/kernels/ops/moe.hpp"
 #include "src/families/qwen/kernels/ops/swiglu.hpp"

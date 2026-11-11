@@ -99,12 +99,10 @@ void RegisterToolDialect() {
           sampling::JsonConstraint::TaggedArguments{
               .parameter_open = std::string(LagunaToolSyntax::kArgKeyOpen),
               // The key ends where its close and the value's open meet.
-              .raw_value_open =
-                  std::string(LagunaToolSyntax::kArgKeyClose) +
-                  std::string(LagunaToolSyntax::kArgValueOpen),
-              .typed_value_open =
-                  std::string(LagunaToolSyntax::kArgKeyClose) +
-                  std::string(LagunaToolSyntax::kArgValueOpen),
+              .raw_value_open = std::string(LagunaToolSyntax::kArgKeyClose) +
+                                std::string(LagunaToolSyntax::kArgValueOpen),
+              .typed_value_open = std::string(LagunaToolSyntax::kArgKeyClose) +
+                                  std::string(LagunaToolSyntax::kArgValueOpen),
               .value_close = std::string(LagunaToolSyntax::kArgValueClose),
               .parameter_separator = "",
           },

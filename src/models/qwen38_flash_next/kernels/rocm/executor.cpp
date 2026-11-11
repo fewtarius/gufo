@@ -3319,18 +3319,17 @@ bool Executor::MoeExperts(const DeviceLayer& l, const float* x, float* out,
     if (!gated_ok) {
       // Name the dispatch that refused: every rejection is a guard on these
       // values, and without them the failure is not diagnosable from a log.
-      AssignError(
-          error_msg,
-          "routed F16 gate/up GEMM failed (wide_tiles=" +
-              std::to_string(routed_wide_tiles_) +
-              " narrow_tiles=" + std::to_string(routed_n_tiles_) +
-              " tile_rows=" + std::to_string(routed_tile_rows_) +
-              " tokens=" + std::to_string(n_tokens) +
-              " slots=" + std::to_string(slots) +
-              " m=" + std::to_string(c.expert_ff) +
-              " k=" + std::to_string(c.hidden_size) +
-              " gate_type=" + std::to_string(static_cast<int>(gate_type)) +
-              " up_null=" + std::to_string(up_half == nullptr) + ")");
+      AssignError(error_msg,
+                  "routed F16 gate/up GEMM failed (wide_tiles=" +
+                      std::to_string(routed_wide_tiles_) +
+                      " narrow_tiles=" + std::to_string(routed_n_tiles_) +
+                      " tile_rows=" + std::to_string(routed_tile_rows_) +
+                      " tokens=" + std::to_string(n_tokens) +
+                      " slots=" + std::to_string(slots) +
+                      " m=" + std::to_string(c.expert_ff) +
+                      " k=" + std::to_string(c.hidden_size) + " gate_type=" +
+                      std::to_string(static_cast<int>(gate_type)) +
+                      " up_null=" + std::to_string(up_half == nullptr) + ")");
       return false;
     }
     const WeightType down_type = l.ffn_down_exps.type == GgmlType::kQ8_0

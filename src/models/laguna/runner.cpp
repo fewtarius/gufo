@@ -411,9 +411,7 @@ public:
     return sampling::JsonConstraint::ToolFormat::kJson;
   }
 
-  [[nodiscard]] std::string ToolDialectId() const override {
-    return "laguna";
-  }
+  [[nodiscard]] std::string ToolDialectId() const override { return "laguna"; }
 
   [[nodiscard]] std::optional<TextPreparedPrompt> PreparePrompt(
       const ChatRequest& request) const override {

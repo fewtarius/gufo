@@ -28,8 +28,8 @@ namespace {
 [[nodiscard]] std::uint32_t PromptBatchRows(const core::ModelConfig& config,
                                             std::uint32_t context,
                                             std::uint32_t moe_rows) noexcept {
-  return std::min(context, config.IsMoe() ? moe_rows
-                                          : QwenGpuArena::kMaxPromptBatch);
+  return std::min(context,
+                  config.IsMoe() ? moe_rows : QwenGpuArena::kMaxPromptBatch);
 }
 
 /// The expert scratch's row count for a policy. Zero in the policy means the

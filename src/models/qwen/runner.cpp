@@ -23,10 +23,10 @@
 
 #include "gufo/ext/component_cache_resources.hpp"
 #include "gufo/ext/experimental/admission_query.hpp"
+#include "gufo/ext/experimental/heap_placement.hpp"
 #include "gufo/ext/gguf_identity.hpp"
 #include "gufo/ext/host_budget.hpp"
 #include "gufo/ext/speculative_verifier.hpp"
-#include "gufo/ext/experimental/heap_placement.hpp"
 #include "src/families/qwen/config/qwen_config.hpp"
 #include "src/families/qwen/control_tokens/control_tokens.hpp"
 #include "src/families/qwen/hip_common/attention_policy.hpp"
@@ -897,10 +897,9 @@ public:
         .scheduling =
             TextSchedulingProfile{
                 .pass_tokens = std::min<std::size_t>(
-                    max_context_,
-                    execution_policy_.prompt_chunk_rows != 0
-                        ? execution_policy_.prompt_chunk_rows
-                        : hip::QwenGpuArena::kMaxPromptBatch),
+                    max_context_, execution_policy_.prompt_chunk_rows != 0
+                                      ? execution_policy_.prompt_chunk_rows
+                                      : hip::QwenGpuArena::kMaxPromptBatch),
                 .max_layer_groups = kMaxPrefillLayerGroups,
                 .max_yield_decode_width = MaximumDecodeBatchWidth(),
             },

@@ -849,7 +849,13 @@ endfunction()
     tests/cli/openai_chat_test.cpp
   )
   target_link_libraries(openai_chat_test PRIVATE gufo_core gufo_logging gufo_http
-    gufo_deepseek_v4_flash_text gufo_laguna ${GUFO_QWEN_LIBRARIES})
+    gufo_deepseek_v4_flash_text ${GUFO_QWEN_LIBRARIES})
+  # The Laguna extension is Linux-only, so a Windows build has no dialect to
+  # register and the test drops that case.
+  if(TARGET gufo_laguna)
+    target_link_libraries(openai_chat_test PRIVATE gufo_laguna)
+    target_compile_definitions(openai_chat_test PRIVATE GUFO_LAGUNA_DIALECT=1)
+  endif()
   add_test(NAME openai_chat_test COMMAND openai_chat_test)
   set_tests_properties(openai_chat_test PROPERTIES
     LABELS "cpu;server;api;openai;streaming;tools")

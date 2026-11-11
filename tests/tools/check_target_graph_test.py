@@ -19,7 +19,7 @@ SPEC.loader.exec_module(GRAPH)
 
 class LinkGraphTest(unittest.TestCase):
     def report(self, targets, forbidden=("gufo_serving", "gufo_http")):
-        return {"hip": True, "absent": [],
+        return {"hip": True, "absent": [], "excluded": [],
                 "forbidden": list(forbidden), "targets": targets}
 
     def test_clean_graph_has_no_violation(self):
@@ -84,6 +84,29 @@ class LinkGraphTest(unittest.TestCase):
         report = self.report({})
         report["absent"] = ["gufo_cache_hip"]
         self.assertTrue(GRAPH.violations(report, ["gufo_cache_hip"]))
+
+    def test_platform_excluded_target_covers_the_gap(self):
+        # An extension whose manifest leaves this platform out has no target
+        # to report, and its libraries are recorded as excluded.
+        report = self.report({"gufo_core": ["gufo_platform"]})
+        report["excluded"] = ["gufo_laguna"]
+        self.assertEqual(
+            GRAPH.violations(report, ["gufo_core", "gufo_laguna"]), [])
+
+    def test_excluded_target_cannot_also_be_present(self):
+        report = self.report({"gufo_laguna": ["gufo_core"]})
+        report["excluded"] = ["gufo_laguna"]
+        problems = GRAPH.violations(report, ["gufo_laguna"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("both present and excluded", problems[0])
+
+    def test_excluded_and_absent_cannot_overlap(self):
+        report = self.report({})
+        report["excluded"] = ["gufo_laguna"]
+        report["absent"] = ["gufo_laguna"]
+        problems = GRAPH.violations(report, ["gufo_laguna"])
+        self.assertTrue(any("both absent and excluded" in problem
+                            for problem in problems), problems)
 
     def test_report_cannot_disable_forbidden_policy(self):
         report = self.report({"gufo_core": ["gufo_http"]}, forbidden=())

@@ -25,9 +25,11 @@ namespace gufo::models::deepseek_v4_flash {
 void RegisterToolDialect();
 }
 
+#ifdef GUFO_LAGUNA_DIALECT
 namespace gufo::models::laguna {
 void RegisterToolDialect();
 }
+#endif
 
 using gufo::tokenization::kImEnd;
 
@@ -1598,6 +1600,7 @@ void TestDeepSeekToolCallsAreStructured() {
 // each argument as a key/value pair. The dialect reaches the parser through
 // the runtime registry, so the test registers it the way the model extension
 // does and drives the same scanner the model ships.
+#ifdef GUFO_LAGUNA_DIALECT
 void TestLagunaToolCallsAreStructured() {
   gufo::models::laguna::RegisterToolDialect();
   const auto call =
@@ -1654,6 +1657,7 @@ void TestLagunaToolCallsAreStructured() {
            "the Laguna markup is not visible content");
   }
 }
+#endif
 
 void TestDeepSeekRepeatedToolParameters() {
   const auto call = [](std::string_view repeat) {
@@ -7859,7 +7863,9 @@ int main() {
   TestQwenToolBoundariesAndSchema();
   TestDeepSeekToolCallsAreStructured();
   TestDeepSeekRepeatedToolParameters();
+#ifdef GUFO_LAGUNA_DIALECT
   TestLagunaToolCallsAreStructured();
+#endif
   TestDeepSeekSchemaCheckedArguments();
   TestStreamingStopsAtRejectedParameter();
   TestWrongModelIsRejected();

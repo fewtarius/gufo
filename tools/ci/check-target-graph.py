@@ -9,7 +9,9 @@ or gufo_http, directly or through an intermediate library.
 
 The report is generated during CMake generation, so this check sees the same
 edges the linker does. A protected target missing from the report is a failure:
-that is how a newly declared library with no coverage gets caught.
+that is how a newly declared library with no coverage gets caught. A target
+whose extension leaves the configured platform out is listed as excluded
+instead of absent, because the manifest says it cannot be built here.
 """
 
 import argparse
@@ -58,12 +60,18 @@ def violations(report, protected):
     if type(report.get("hip")) is not bool:
         problems.append("report must record boolean hip configuration")
     absent = set(report.get("absent", []))
+    excluded = set(report.get("excluded", []))
+    for name in sorted(absent & excluded):
+        problems.append(f"target {name} is both absent and excluded")
     for name in sorted(absent):
         if name not in HIP_ONLY or report.get("hip") is not False:
             problems.append(f"protected target {name} cannot be absent in this configuration")
         if name in report["targets"]:
             problems.append(f"target {name} is both present and absent")
-    declared = set(report["targets"]) | absent
+    for name in sorted(excluded):
+        if name in report["targets"]:
+            problems.append(f"target {name} is both present and excluded")
+    declared = set(report["targets"]) | absent | excluded
     problems.extend(f"protected target {name} is missing from the link graph"
                     for name in protected if name not in declared)
     for name in sorted(report["targets"]):

@@ -20,10 +20,11 @@ class TableSpec:
 
     @property
     def kind(self) -> str:
-        if self.base.startswith("single-"):
-            return "single"
-        if self.base.startswith("multi-"):
-            return "multi"
+        # A table may carry a device suffix (loading-handheld), so match the
+        # family by prefix rather than by an exact base name.
+        for family in ("single", "multi", "loading", "memory", "image-encoder"):
+            if self.base == family or self.base.startswith(family + "-"):
+                return family
         return self.base
 
     @property

@@ -1,9 +1,9 @@
 # Laguna S 2.1 Port State
 
 > This file is a historical record of the port process. Current performance
-> numbers, quality checks, and configuration are in [README.md](../../../docs/models/laguna/README.md),
-> [BENCHMARKS.md](../../../docs/models/laguna/BENCHMARKS.md), [QUALITY.md](../../../docs/models/laguna/QUALITY.md), and
-> [EXPERIMENTS.md](../../../docs/models/laguna/EXPERIMENTS.md). The port is complete; this file is kept
+> numbers, quality checks, and configuration are in [laguna.md](../../../docs/models/laguna.md),
+> [BENCHMARKS.md](../../../docs/internal/models/laguna/BENCHMARKS.md), [QUALITY.md](../../../docs/internal/models/laguna/QUALITY.md), and
+> [EXPERIMENTS.md](../../../docs/internal/models/laguna/EXPERIMENTS.md). The port is complete; this file is kept
 > for context on how decisions were reached.
 
 ## Branch & Model Target

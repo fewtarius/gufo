@@ -1,5 +1,9 @@
 # KV row codec
 
+How one attention K or V row is stored when it is not stored as F16: the
+`q8_0` and `q4_0` block layouts, their scale conventions, and the numeric
+rules a model's attention must follow to read them back.
+
 ## Scope
 
 This document specifies the **row codec**: how one attention K or V row is

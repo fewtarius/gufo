@@ -15,6 +15,8 @@ pages explain how to install it, run models, and extend it with your own.
 ## Run it well
 
 - [Cache](cache.md): how Gufo reuses work across requests, and how to size it.
+- [K/V row codec](kv-codec.md): how a K or V row is stored at `q8_0` and
+  `q4_0`, and what a model has to do to read it back.
 - [Troubleshooting](troubleshooting.md): diagnostics, logs and common failures.
 - [Benchmarks](benchmarks.md): how the published speeds are measured.
 - [Versions](versions.md): what a release promises and where it's published.

@@ -124,6 +124,48 @@ Decode flattens with depth: the sliding-window layers and the FFN/MoE cost
 become a larger share of the step once the split-K attention layers' own cost
 shrinks.
 
+## Speculation rule
+
+`gufo serve` drafts for Laguna on greedy and sampled targets alike. It samples
+the drafter's proposals at the target's temperature and accepts a draft with
+probability `P_target(draft)`, resampling from the residual on a miss. That
+rule is unbiased: for a draft from the drafter's distribution `q` and the
+target's `p`, the published token `z` lands with probability
+`q(z)p(z) + p(z)(1 - q(z)) = p(z)`. It is the same rule the prompt CLI uses.
+
+Measured on the N161 at 141,170 tokens with `temperature=0.7`: 16.1 tok/s with
+40% of drafts accepted, against 14.4 tok/s plain.
+
+Before 2026-11-03 the server refused to draft whenever the request sampled, so
+an agent client that sends a temperature got plain decode and none of the
+DFlash gain. `LAGUNA_DFLASH_DEBUG=1` reports why a step did not draft: the
+injected-context frontier against the session position, the draft budget, and
+whether the request samples.
+
+## Split-K decode attention
+
+Decode flattened substantially at this port (split-K decode attention, ported
+from the Flash-Next/Flint technique): 26 -> 19.8 -> 12.5 tok/s before, and
+26 -> 24.0 -> 20.3 -> 14.8 tok/s after, at comparable depths. Not literally
+flat: sliding-window-layer and FFN/MoE kernel cost becomes a larger share of
+the step once the split non-SWA attention layers' own cost shrinks.
+
+## NPU offload
+
+NPU gain is +0.2% to +2.4% depending on depth. Shared-expert gate/up is a small
+fraction of total per-layer FLOPs for this model's shape (72 query heads), not
+the flat, large win it is for models with fewer heads.
+
+QKV on the NPU is built (cross-layer submit/consume, bank-aware) and measured
+as a net loss for Laguna specifically: the widest layers need 22 NPU round
+trips per layer per bank (9 Q-slices + 1 K + 1 V, x2 for the hi/lo residual
+pass), more than the available hide window absorbs. It stays off by default;
+`LAGUNA_NPU_QKV=1` opts in and is not recommended.
+
+Full investigation, every dead end, and the exact numbers behind each of these:
+[laguna-port-state.md](../../../../src/models/laguna/laguna-port-state.md), a
+historical record of the port process.
+
 ## TODO
 
 - Reconcile the q8_0 saving between 131072 and 262144 (above).

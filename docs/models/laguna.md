@@ -1,13 +1,11 @@
 # Laguna S 2.1
 
-Mixture-of-experts text model (48 layers, hidden 3,072, 8 KV heads of 128, heads
-per layer [48,72,72,72] repeating, 256 experts with 10 routed plus a shared
-expert, sliding-window attention of 512 on 3 of every 4 layers) on gfx1151. The
-tested weights are `Laguna-S-2.1-UD-Q4_K_M.gguf` (68 GB; Q8_0 attention,
-Q4_K/Q5_K experts).
-
-NPU kernel: `tools/npu/runtime_mk/` (K=3,072 instruction file built this port -
-the shared XCLBIN needed no changes, see its README's "Adding a shape").
+Mixture-of-experts text model on gfx1151: 48 layers, hidden 3,072, 8 KV heads
+of 128, heads per layer [48,72,72,72] repeating, 256 experts with 10 routed
+plus a shared expert, sliding-window attention of 512 on 3 of every 4 layers.
+The tested weights are `Laguna-S-2.1-UD-Q4_K_M.gguf` (68 GB; Q8_0 attention,
+Q4_K/Q5_K experts). The NPU kernel is `tools/npu/runtime_mk/`; see its README
+for adding a shape.
 
 ## Run
 
@@ -40,53 +38,27 @@ binary named `gufo*`.
 | 47,280 tokens | 20.3 |
 | 133,284 tokens | 14.8 |
 
-Those plain-decode numbers are what a server request sees when the drafter
-is off or the context is too deep for it to help. At 141,170 tokens on the
-N161, `gufo serve` measured 14.4 tok/s plain and 16.1 tok/s with the
-drafter at `temperature=0.7`.
+Those plain-decode numbers are what a server request sees when the drafter is
+off or the context is too deep for it to help. At 141,170 tokens on the N161,
+`gufo serve` measured 14.4 tok/s plain and 16.1 tok/s with the drafter at
+`temperature=0.7`.
 
-DFlash v1's gain is sharply content-dependent, same pattern every other
-model in this project shows: 79% of drafts accepted on code (44.5 tok/s),
-35% on prose (27.9 tok/s), and a short/trivial prompt can land BELOW plain
-decode (25% accepted, 24.0 tok/s on a "why is the sky blue" filler prompt)
-- measure on real target text, not a filler prompt, before trusting a
-single decode number. Measured via `gufo prompt`
-(`--speculative dflash2 --dflash-model ... -d 3`).
+DFlash v1's gain is sharply content-dependent: 79% of drafts accepted on code
+(44.5 tok/s), 35% on prose (27.9 tok/s), and a short or trivial prompt can land
+below plain decode. Measure on real target text, not a filler prompt, before
+trusting a single decode number.
 
-`gufo serve` supports `--speculative` for Laguna too. It drafts for greedy
-AND sampled targets: it samples the drafter's proposals at the target's
-temperature and accepts a draft with probability `P_target(draft)`,
-resampling from the residual on a miss. That rule is unbiased - for a draft
-from the drafter's distribution q and the target's p, the published token z
-lands with probability `q(z)p(z) + p(z)(1 - q(z)) = p(z)` - and it is the
-same rule the prompt CLI uses. Measured on a Nimo Axis N161 (Strix Halo,
-Ryzen AI Max+ 395, Radeon 8060S, 124.9 GiB RAM visible) at 141,170
-tokens with `temperature=0.7`: 16.1 tok/s with 40% of drafts accepted,
-against 14.4 tok/s plain.
+`gufo prompt` takes `--speculative dflash2 --dflash-model ...`; `gufo serve`
+takes `--speculative` and drafts for greedy and sampled requests alike.
 
-Before 2026-11-03 the server refused to draft whenever the request sampled,
-so an agent client that sends a temperature got plain decode and none of
-the numbers above. `LAGUNA_DFLASH_DEBUG=1` reports why a step did not
-draft - the injected-context frontier against the session position, the
-draft budget, and whether the request samples.
+NPU offload of shared-expert gate/up is a small win (+0.2% to +2.4% depending
+on depth) because those projections are a small fraction of per-layer FLOPs at
+this model's shape. QKV on the NPU is built but a measured net loss for Laguna,
+so it stays off by default.
 
-NPU gain is +0.2% to +2.4% depending on depth - shared-expert gate/up is a
-small fraction of total per-layer FLOPs for this model's shape (72 query
-heads), not a flat/large win the way it is for models with fewer heads. QKV
-on the NPU is built (cross-layer submit/consume, bank-aware) but measured as
-a net loss for Laguna specifically - the widest layers need 22 NPU round
-trips per layer per bank (9 Q-slices + 1 K + 1 V, x2 for the hi/lo residual
-pass), more than the available hide window absorbs. Left off by default
-(`LAGUNA_NPU_QKV=1` opts in, not recommended). Full investigation, every
-dead end, and the exact numbers behind each of the above:
-[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md)
-(a historical record of the port process).
-
-Decode flattened substantially at depth this port (split-K decode attention,
-ported from Flash-Next/Flint's technique): 26 -> 19.8 -> 12.5 tok/s before,
-26 -> 24.0 -> 20.3 -> 14.8 tok/s after, at comparable depths. Not literally
-flat - SWA-layer and FFN/MoE kernel cost becomes a larger share of the step
-once the split non-SWA attention layers' own cost shrinks.
+Measurement protocol, acceptance rules and the port's full investigation:
+[internal/models/laguna/BENCHMARKS.md](../internal/models/laguna/BENCHMARKS.md)
+and [laguna-port-state.md](../../src/models/laguna/laguna-port-state.md).
 
 ## Block-sparse attention (opt-in)
 
@@ -107,16 +79,11 @@ every depth tested:
 | 61,108 tok | 835.3 tok/s, correct | 973.2 tok/s, correct | +16.5% |
 | 100,616 tok | 694.6 tok/s, correct | 958.0 tok/s, correct | +37.9% |
 
-Gain grows with depth (the candidate pool to prune grows with position).
-Verified stacking cleanly with the NPU and two-bank pipeline (995.7 tok/s
-at 61,108 tokens, all three on, no corruption) and across a 2,600-token
-generation past the decode HIP-graph capture boundary (a real, separate
-bug found and fixed this port - see
-[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md)
-(a historical record of the port process)
-for the full account, including three real selection bugs found when
-this was first turned on). Off by default; `LAGUNA_SPARSE_TOPK=N`
-overrides the 256-block budget.
+Gain grows with depth, because the candidate pool to prune grows with
+position. It stacks cleanly with the NPU and the two-bank pipeline.
+`LAGUNA_SPARSE_TOPK=N` overrides the 256-block budget. The selection bugs and
+the graph-capture boundary found while porting it are in
+[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md).
 
 ## Options (environment)
 
@@ -127,39 +94,27 @@ overrides the 256-block budget.
 | `LAGUNA_NPU_QKV=1` | Also offload QKV to the NPU - measured net loss, off by default |
 | `LAGUNA_SPARSE_ATTN=1` | Block-sparse attention on the 12 full-attention layers - off by default |
 | `LAGUNA_SPARSE_TOPK=N` | Candidate-block budget for sparse attention (default 256) |
-| `LAGUNA_PREFILL_TILE=N` | Prefill chunk size (default 4,096); needs a matching NPU instruction
-file if `GUFO_NPU_DIR` is set and N != 4,096 |
-| `LAGUNA_KV_CACHE_TYPE=q8_0` | Store the attention K/V cache as q8_0 instead of F16 - 53.125% of
-the bytes, lossy. See [internal/models/laguna/KV-Q8.md](../internal/models/laguna/KV-Q8.md) |
+| `LAGUNA_PREFILL_TILE=N` | Prefill chunk size (default 4,096); a different N needs a matching NPU instruction file |
+| `LAGUNA_KV_CACHE_TYPE=q8_0` | Store K/V as q8_0 instead of F16: 53.125% of the bytes, lossy. See [KV-Q8.md](../internal/models/laguna/KV-Q8.md) |
 
 ## Numerical notes
 
-- Routed-expert activations are stored in F32 divided by 64 (the combine
-  multiplies it back).
-- The NPU path is not bit-identical to the GPU path (block-float, same as
-  every other model's NPU offload in this project); real-generation output
-  diverges from the GPU-only path after several tokens on real prose, the
-  same accepted-divergence class as this port's other numeric changes (W8A8
-  dense projections, the Q8_0 vector path, etc.) - confirmed NOT a bug after
-  an earlier false alarm (see laguna-port-state.md's precision investigation
-  section) found the "evidence" was itself measuring against an inexact
-  reference and a near-tie-prone filler prompt.
+Routed-expert activations are stored in F32 divided by 64; the combine
+multiplies it back. The NPU path is not bit-identical to the GPU path
+(block-float, as for every other NPU offload here), so output diverges after
+several tokens on real prose - the same accepted-divergence class as the other
+numeric changes here. The port's precision investigation is in
+[laguna-port-state.md](../../src/models/laguna/laguna-port-state.md).
 
 ## Status
 
-Prefill and decode verified against greedy text and `--validate-prefill`.
-DFlash v1 drafter working (coherent generation, real acceptance rate). NPU
-shared-expert offload on by default; QKV offload built but off by default
-(see Speed section). `gufo serve llm` works (smoke-tested: load, warm-up,
-a real `/v1/chat/completions` request) but has no snapshot/disk-cache
-reuse yet (the engine's `Session` has no save/restore) and rejects
-`--speculative` (DFlash v1 is `gufo prompt`/`gufo bench`-only for now).
-Block-sparse attention built and verified (needle-in-haystack at three
-depths, two-bank+NPU interaction, decode graph-capture boundary) but off
-by default (`LAGUNA_SPARSE_ATTN=1` opts in; see Block-sparse attention
-above). Fast HumanEval check (`--limit 20`) with sparse attention on:
-20/20, pass@1 = 1.0. Not done: a CPU-reference regression
-script, model tests under `tests/`, and the standard cross-model
-regression run for the shared `dflash_weights.cpp`/`qfn_mmq.hip.cpp` edits
-(done manually this session against Flash-Next/27B/35B/GLM, not yet
-automated).
+Prefill and decode are verified against greedy text and `--validate-prefill`.
+DFlash2 speculation works from both `gufo prompt` and `gufo serve`, on greedy
+and sampled requests. NPU shared-expert offload is on by default; QKV offload
+is built and off by default.
+
+`gufo serve` reuses work through the component cache, so a repeated prompt or
+a restored session continues from its own retained state. Block-sparse
+attention is verified (needle-in-a-haystack at three depths, two-bank and NPU
+interaction, the decode graph-capture boundary) and off by default;
+`LAGUNA_SPARSE_ATTN=1` opts in.

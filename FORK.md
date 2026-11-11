@@ -12,11 +12,11 @@ files that Laguna's presence requires.
 
 | | |
 |---|---|
-| **Laguna S 2.1** | A MoE text model on gfx1151: 48 layers, hidden 3,072, 8 KV heads of 128, 256 experts with 10 routed plus a shared expert, sliding-window attention of 512 on 3 of every 4 layers. See [docs/models/laguna/](docs/models/laguna/README.md). |
+| **Laguna S 2.1** | A MoE text model on gfx1151: 48 layers, hidden 3,072, 8 KV heads of 128, 256 experts with 10 routed plus a shared expert, sliding-window attention of 512 on 3 of every 4 layers. See [docs/models/laguna.md](docs/models/laguna.md). |
 | **Block-sparse attention** | Quest-style block selection on the 12 full-attention layers. A prefill win that grows with depth: +52% at 141k tokens. |
 | **DFlash2 speculative decoding** | The drafter predicts a block of tokens from the target's tapped hidden states; each is verified against the target's own logits. |
 | **Native tool calls** | Laguna's `<tool_call>{name}<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` dialect, compiled into the sampler as a grammar and read back by a scanner. |
-| **KV row codec** | A model-agnostic q8_0/q4_0 row codec in `src/core/kv_codec/`, with the contract in [docs/kv-codec.md](docs/kv-codec.md). The Laguna engine and the Qwen runner can store their K/V cache as q8_0. See [Laguna](docs/models/laguna/KV-Q8.md) and [Qwen](docs/models/qwen3.8-27b/KV-Q8.md). |
+| **KV row codec** | A model-agnostic q8_0/q4_0 row codec in `src/core/kv_codec/`, with the contract in [docs/kv-codec.md](docs/kv-codec.md). The Laguna engine and the Qwen runner can store their K/V cache as q8_0. See [Laguna](docs/internal/models/laguna/KV-Q8.md) and [Qwen](docs/internal/models/qwen3.8-27b/KV-Q8.md). |
 | **Sampled-request speculation** | The server drafts for sampled requests as well as greedy ones, using the prompt CLI's acceptance rule. |
 
 ## What this fork does not carry
@@ -44,7 +44,7 @@ Or through the fork's own wrapper, if present, which sets the ROCm paths:
 cmake --build build --parallel
 ```
 
-Otherwise use the standard build documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md):
+Otherwise use the standard build documented in [docs/internal/development.md](docs/internal/development.md):
 
 ```sh
 nix build .#release
@@ -59,7 +59,7 @@ gufo serve llm --host 0.0.0.0 --port 9090 \
 ```
 
 `LAGUNA_KV_CACHE_TYPE=q8_0` stores the attention K/V cache as q8_0 instead of
-F16. See [docs/models/laguna/KV-Q8.md](docs/models/laguna/KV-Q8.md).
+F16. See [docs/internal/models/laguna/KV-Q8.md](docs/internal/models/laguna/KV-Q8.md).
 
 ## Layout
 

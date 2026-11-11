@@ -172,10 +172,10 @@ are `bench-main-q4`, `bench-v3-q4`, `bench-v7-final-q4`, `bench-v8-q4`,
 `sampling-v8-final`, both `snapshot-control-*` directories, `lookup-v8-q4`,
 `lookup-main-control-q4`, `lookup-timing-pair`, `workflows-main` and
 `workflows-v8-final`.
-Superseded experiments and every timing flag remain retained. The focused
-[performance table](BENCHMARKS.md#october-21-focused-prefill-and-sampling-comparison)
-keeps the dated main/candidate results; the older full sweep and llama.cpp
-measurements are unchanged. Feature capture/storage work in #688 is separate.
+Superseded experiments and every timing flag remain retained. The current
+[performance tables](BENCHMARKS.md) were measured on a clean Gufo build; the
+dated main/candidate comparison and the llama.cpp measurements no longer
+appear on the page. Feature capture/storage work in #688 is separate.
 
 ## October 19 wave64 verification review
 

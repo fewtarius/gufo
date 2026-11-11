@@ -66,9 +66,9 @@ all on this device:
 | F16 | 262,144 | needs 16,968 MiB KV + 7,971 MiB scratch | refused, 21,376 MiB free |
 | q8_0 | 262,144 | 109,195 MiB | loads and runs |
 
-The same model therefore has no F16 row at native context. A paired sweep
-(UD-Q5_K_XL F16 at 131072 against q8_0 at 262144) is in
-[BENCHMARKS.md](BENCHMARKS.md#ud-q5_k_xl).
+The same model therefore has no F16 row at native context. The q8_0 rows at
+262,144 are in
+[BENCHMARKS.md](BENCHMARKS.md#ud-q5_k_xl-context-262144-q8_0-kv).
 
 ### The drafter is the real cost
 

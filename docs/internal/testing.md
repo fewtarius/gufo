@@ -248,8 +248,7 @@ appending the next evaluation token. Free-running text diverges after one
 different choice and cannot isolate numerical or quantization error.
 
 Relevant metrics include non-finite counts, normalized-logit error, KL,
-teacher-token NLL/perplexity, top-1 agreement, and top-k overlap. See
-[benchmark quality methodology](benchmarks.md#quality-method-matched-token-per-position).
+teacher-token NLL/perplexity, top-1 agreement, and top-k overlap.
 For a discrepancy, capture the earliest changed embedding, normalization,
 attention/recurrent state, routed expert, layer output, or LM-head boundary.
 Preserve the failing input and add a focused reproducer before fixing it.

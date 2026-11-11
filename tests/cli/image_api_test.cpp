@@ -223,11 +223,13 @@ void TestStartupOptions(const std::filesystem::path& encoder) {
 
   // Forwarding: typed, explicit-only options reach the selected provider.
   auto options = Parse(registry, {encoder_arg, "--encoder-threads", "4"});
-  const auto& restricted =
-      server::SelectImageProvider(registry, "restricted", options);
-  Require(restricted.id == "restricted-image", "probe selects provider");
+  // Held by pointer: SelectImageProvider returns a reference, and binding a
+  // reference to a call that takes references reads as a dangling temporary.
+  const auto* restricted =
+      &server::SelectImageProvider(registry, "restricted", options);
+  Require(restricted->id == "restricted-image", "probe selects provider");
   const auto runner =
-      server::CreateImageRunner(restricted, "restricted", options);
+      server::CreateImageRunner(*restricted, "restricted", options);
   Require(runner != nullptr && g_created == 1, "factory called once");
   Require(g_received.model_root == "restricted", "model root forwarded");
   Require(g_received.options.size() == 2, "only supplied options forwarded");
@@ -277,10 +279,10 @@ void TestStartupOptions(const std::filesystem::path& encoder) {
       "no options-aware factory");
   // CPU-only probe behaviour: selection still works, creation explains why
   // it cannot run instead of calling a null factory.
-  const auto& probe_only =
-      server::SelectImageProvider(registry, "probe-only", {});
-  Require(probe_only.id == "probe-only-image", "probe-only selection");
-  Fail([&] { server::CreateImageRunner(probe_only, "probe-only", {}); },
+  const auto* probe_only =
+      &server::SelectImageProvider(registry, "probe-only", {});
+  Require(probe_only->id == "probe-only-image", "probe-only selection");
+  Fail([&] { server::CreateImageRunner(*probe_only, "probe-only", {}); },
        "cannot run in this build");
 
   // `serve` and modality-specific declarations overlap for conflict checks.

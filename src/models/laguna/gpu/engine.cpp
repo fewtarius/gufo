@@ -29,6 +29,20 @@ namespace {
 // layers hold a ring of sliding_window + 2*tile rows; the full-attention
 // layers hold one row per token. Both the K and the V cache store one
 // half per element.
+// Rows a sliding-window layer's K/V ring must hold: the window itself plus one
+// prefill tile, because a forward writes up to `tile` new rows and then reads
+// every key back to window+1 rows behind its own queries. Sizing the ring for
+// one tile only let the new rows wrap and overwrite rows the same forward still
+// needed.
+//
+// The budget check and the allocation both size the ring through this, so one
+// cannot claim a different cache than the other allocates.
+std::size_t SessionSwaRows(const Config& config, std::uint32_t context,
+                           std::uint32_t tile) {
+  return std::min<std::size_t>(
+      context, static_cast<std::size_t>(config.sliding_window) + tile);
+}
+
 std::size_t SessionBytesForContextLocked(const Config& config,
                                          std::uint32_t context,
                                          std::uint32_t tile,
@@ -42,9 +56,8 @@ std::size_t SessionBytesForContextLocked(const Config& config,
   std::size_t bytes = 0;
   for (std::uint32_t il = 0; il < config.num_layers; ++il) {
     std::uint32_t rows = context;
-    if (config.IsSwa(il)) {
-      rows = std::min(context, config.sliding_window + 2 * tile);
-    }
+    if (config.IsSwa(il))
+      rows = static_cast<std::uint32_t>(SessionSwaRows(config, context, tile));
     bytes += 2 * row_bytes * rows;
   }
   return bytes;
@@ -251,67 +264,93 @@ std::uint32_t TileCapacityFor(std::size_t slots, std::uint32_t experts) {
 }
 
 // Device scratch a session allocates beside its KV cache: every buffer Init()
-// sizes from the prefill tile and from the routed slot count. This mirrors
-// that allocation list so the budget check in Init() can compare against what
-// the session actually needs instead of a multiple of the cache, which on a
-// 112 GiB pool rejected configurations that fit with gigabytes to spare.
-std::size_t SessionScratchBytes(const Config& config, std::uint32_t tile,
-                                std::size_t q_row, std::size_t kv_row) {
+// sizes from the prefill tile and from the routed slot count, plus the two
+// allocations that would otherwise land outside the budget entirely - the
+// sparse-attention pool rings Init() allocates under LAGUNA_SPARSE_ATTN, and
+// the drafter's tap capture Model::CreateSession allocates just after Init().
+// The budget check compares against what the session actually needs instead of
+// a multiple of the cache, which on a 112 GiB pool rejected configurations that
+// fit with gigabytes to spare.
+//
+// Keep this in step with the allocation list in Init(). A buffer added there
+// and not here under-counts the budget, and an under-counted budget is admitted
+// and then read unbacked, which surfaces as non-finite logits rather than an
+// allocation error.
+std::size_t SessionScratchBytes(const Config& config, std::uint32_t capacity,
+                                std::uint32_t tile, std::size_t q_row,
+                                std::size_t kv_row, bool sparse_attn,
+                                std::size_t drafter_bytes) {
   const std::uint32_t max_heads =
       *std::max_element(config.heads.begin(), config.heads.end());
-  const std::size_t slots =
-      static_cast<std::size_t>(tile) * config.expert_used;
+  const std::size_t slots = static_cast<std::size_t>(tile) * config.expert_used;
   const std::size_t t = tile;
   const std::size_t hidden = config.hidden_size;
 
   std::size_t f32_elems = 0;
-  f32_elems += t * hidden;                                   // x
-  f32_elems += t * hidden;                                   // xn
-  f32_elems += t * q_row;                                    // q
-  f32_elems += t * q_row;                                    // attn
-  f32_elems += t * kv_row;                                   // k
-  f32_elems += t * kv_row;                                   // v
-  f32_elems += t * max_heads;                                // gate
-  f32_elems += t * hidden;                                   // o
-  f32_elems += t * config.expert_count;                      // router
+  f32_elems += t * hidden;               // x
+  f32_elems += t * hidden;               // xn
+  f32_elems += t * q_row;                // q
+  f32_elems += t * q_row;                // attn
+  f32_elems += t * kv_row;               // k
+  f32_elems += t * kv_row;               // v
+  f32_elems += t * max_heads;            // gate
+  f32_elems += t * hidden;               // o
+  f32_elems += t * config.expert_count;  // router
   f32_elems += std::size_t{Session::kMaxVerifyRows} * max_heads *
-               kSplitAttnSplits * (config.head_dim + 2);      // attn_partials
-  f32_elems += slots * config.expert_ff;                      // gate_e
-  f32_elems += slots * config.expert_ff;                      // up_e
-  f32_elems += slots * hidden;                                // down_e
-  f32_elems += slots;                                         // topk
-  f32_elems += slots;                                         // expert_scale
-  f32_elems += slots;                                         // expert_const
-  f32_elems += t * config.shared_ff;                          // sh_gate
-  f32_elems += t * config.shared_ff;                          // sh_up
-  f32_elems += t * hidden;                                    // sh_out
-  f32_elems += t * config.dense_ff;                           // dense_gate
-  f32_elems += t * config.dense_ff;                           // dense_up
+               kSplitAttnSplits * (config.head_dim + 2);       // attn_partials
+  f32_elems += slots * config.expert_ff;                       // gate_e
+  f32_elems += slots * config.expert_ff;                       // up_e
+  f32_elems += slots * hidden;                                 // down_e
+  f32_elems += slots;                                          // topk
+  f32_elems += slots;                                          // expert_scale
+  f32_elems += slots;                                          // expert_const
+  f32_elems += t * config.shared_ff;                           // sh_gate
+  f32_elems += t * config.shared_ff;                           // sh_up
+  f32_elems += t * hidden;                                     // sh_out
+  f32_elems += t * config.dense_ff;                            // dense_gate
+  f32_elems += t * config.dense_ff;                            // dense_up
   f32_elems += std::size_t{Session::kMaxVerifyRows} * hidden;  // last
   f32_elems +=
       std::size_t{Session::kMaxVerifyRows} * config.vocab_size;  // d_logits
 
   std::size_t i32_elems = 0;
-  i32_elems += t;                                // tokens
-  i32_elems += slots;                            // ids
-  i32_elems += 2;                                // dense_bounds
-  i32_elems += t;                                // dense_rows
-  i32_elems += (t + 127) / 128;                  // dense_tiles
-  i32_elems += 4;                                // pos (uint32)
-  i32_elems += config.expert_count;              // counts (uint32)
-  i32_elems += kMaxExperts + 1;                  // route_bounds
-  i32_elems += kMaxExperts;                      // route_cursors
+  i32_elems += t;                    // tokens
+  i32_elems += slots;                // ids
+  i32_elems += 2;                    // dense_bounds
+  i32_elems += t;                    // dense_rows
+  i32_elems += (t + 127) / 128;      // dense_tiles
+  i32_elems += 4;                    // pos (uint32)
+  i32_elems += config.expert_count;  // counts (uint32)
+  i32_elems += kMaxExperts + 1;      // route_bounds
+  i32_elems += kMaxExperts;          // route_cursors
   i32_elems += 2 * qwen38_flash_next::rocm::RoutedCompactRows(
                        slots, config.expert_count);  // rows_token, rows_slot
   i32_elems += 2 * TileCapacityFor(slots, config.expert_count);
 
-  const std::size_t half_elems = slots * config.expert_ff  // act_half
-                                 + t * q_row               // qh
+  const std::size_t half_elems = slots * config.expert_ff       // act_half
+                                 + t * q_row                    // qh
                                  + t * std::max(q_row, hidden)  // xh_wide
                                  + t * hidden;                  // xh
 
+  // Sparse attention keeps one pool ring per full-attention layer, sized from
+  // the context rather than the tile. Init() allocates it only when
+  // LAGUNA_SPARSE_ATTN is set, and at a long context it is the largest term
+  // here after the cache itself, so leaving it out under-counts badly.
+  std::size_t sparse_elems = 0;
+  if (sparse_attn) {
+    const std::size_t blocks = (static_cast<std::size_t>(capacity) + 63) / 64;
+    std::size_t full_layers = 0;
+    for (std::uint32_t il = 0; il < config.num_layers; ++il) {
+      if (!config.IsSwa(il))
+        ++full_layers;
+    }
+    sparse_elems =
+        full_layers * static_cast<std::size_t>(config.num_kv) * blocks * 256;
+  }
+
   return f32_elems * sizeof(float) + i32_elems * sizeof(std::int32_t) +
-         half_elems * sizeof(__half);
+         half_elems * sizeof(__half) + sparse_elems * sizeof(__half) +
+         drafter_bytes;
 }
 
 }  // namespace
@@ -574,6 +613,17 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
       *std::max_element(c.heads.begin(), c.heads.end());
   const std::size_t q_row = static_cast<std::size_t>(max_heads) * c.head_dim;
   const std::size_t slots = static_cast<std::size_t>(tile) * c.expert_used;
+  const bool sparse_attn = std::getenv("LAGUNA_SPARSE_ATTN") != nullptr;
+
+  // The drafter's tap capture is allocated by Model::CreateSession right after
+  // this returns, so it has to be counted here or the budget admits a session
+  // that then allocates over it. CreateSession allocates it only for a session
+  // that has a drafter with taps, which is the same condition as here.
+  const std::size_t drafter_bytes =
+      (model->dflash_model != nullptr && !model->dflash_taps.empty())
+          ? std::size_t{model->dflash_window + Session::kMaxVerifyRows} *
+                model->dflash_taps.size() * c.hidden_size * sizeof(float)
+          : 0;
 
   // Size the KV cache before allocating it. On a unified-memory GPU the
   // device pool is backed by host RAM, so an over-large allocation can be
@@ -591,8 +641,8 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
       // headroom for the KV cache plus that scratch - the scratch itself, not
       // a second cache-sized copy of it - and refuse rather than run with a
       // cache the device cannot back.
-      const std::size_t scratch_bytes =
-          SessionScratchBytes(c, tile, q_row, kv_row);
+      const std::size_t scratch_bytes = SessionScratchBytes(
+          c, capacity, tile, q_row, kv_row, sparse_attn, drafter_bytes);
       const std::size_t need_bytes = kv_bytes + scratch_bytes;
       if (need_bytes > free_bytes) {
         return Fail(error_msg,
@@ -616,21 +666,17 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
   for (std::uint32_t il = 0; il < c.num_layers; ++il) {
     std::uint32_t rows = capacity;
     if (c.IsSwa(il)) {
-      // Sized for the window plus one prefill tile: a forward writes up to
-      // `tile` new rows and then reads every key back to window+1 rows
-      // behind its own queries, so the ring has to hold both at once.
-      // Sizing it for one tile only let the new rows wrap around and
-      // overwrite rows the same forward's sliding-window attention still
-      // needed.
+      // The window plus one prefill tile; SessionSwaRows is the single
+      // definition of that, so the budget check sizes this cache the same way
+      // this allocation does.
       ring[il] = c.sliding_window + tile;
-      rows = std::min(capacity, ring[il]);
+      rows = static_cast<std::uint32_t>(SessionSwaRows(c, capacity, tile));
       if (rows == capacity)
         ring[il] = 0;
     }
     ok = ok && k_cache[il].Allocate(kv_row_bytes * rows) &&
          v_cache[il].Allocate(kv_row_bytes * rows);
   }
-  const bool sparse_attn = std::getenv("LAGUNA_SPARSE_ATTN") != nullptr;
   sparse_pooled.resize(c.num_layers);
   sparse_valid_end.assign(c.num_layers, 0);
   if (sparse_attn) {

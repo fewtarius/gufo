@@ -30,8 +30,7 @@
   },
   "notes": [
     "peak device-global hipMemGetInfo used bytes (total - free), sampled every 250 ms during the request; idle_gib is the same counter before the server started",
-    "server mode: ar",
-    "rows not measured on 2026-11-11 retain values from 2026-10-18"
+    "server mode: ar"
   ],
   "referenceName": null,
   "rows": {
@@ -41,12 +40,12 @@
       "idle_gib": 2.38
     },
     "32K prefix, pp4096 + tg128": {
-      "command": "gufo serve --port 42857 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 39771 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "gib": 85.64,
       "idle_gib": 0.0
     },
     "pp2048 + tg128": {
-      "command": "gufo serve --port 42857 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 39771 --sessions 1 llm --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "gib": 85.51,
       "idle_gib": 0.0
     }
@@ -57,7 +56,7 @@
       "gufo",
       "serve",
       "--port",
-      "42857",
+      "39771",
       "--sessions",
       "1",
       "llm",
@@ -76,7 +75,7 @@
   "source": {
     "buildMode": "nix-release",
     "dirty": true,
-    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
+    "revision": "b2011880f29f08ee6601577af619edd2a3c92300"
   },
   "table": "memory",
   "target": "gufo"

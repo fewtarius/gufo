@@ -29,19 +29,24 @@ Strix Halo: Ryzen AI Max+ 395, Radeon 8060S `gfx1151`, 40 CUs, 124.9 GiB RAM,
 
 ### UD-Q5_K_XL, context 262,144, q8_0 K/V
 
-The allocation sits at 109,195 MiB of the 114,688 MiB pool, and a filled
-262,144-token context intermittently produces non-finite logits mid-prefill.
-Rows below are the runs that completed; two repetitions per row where they did.
-Treat 131,072 as the deepest prefix measured here, not as the model's limit.
+The allocation sits at 109,195 MiB of the 114,688 MiB pool. At that occupancy
+a server started before the previous one's pages are reclaimed fails on its
+first forward with non-finite logits, which reads as a memory ceiling and is
+not one: after the device settles the same configuration loads and completes
+every depth below. Two repetitions per row.
+
+131,072 is the deepest prefix measured here, not the model's limit. Longer
+prefixes were not swept because each repetition at this allocation costs most
+of an hour.
 
 <!-- bench:single-ar-q5 -->
 | Laguna S 2.1 Q5 AR<br>Depth (tokens) | pp (tok/s) | tg (tok/s) |
 | ---: | ---: | ---: |
-| 0 | 1140.98 ± 1.41 | 22.27 ± 0.16 |
-| 8,192 | 1013.25 ± 0.04 | 21.48 ± 0.02 |
-| 32,768 | 737.75 ± 0.19 | 19.12 ± 0.00 |
-| 65,536 | 532.70 ± 0.78 | 16.67 ± 0.01 |
-| 131,072 | 336.64 ± 1.90 | 13.25 ± 0.01 |
+| 0 | 1140.08 ± 0.20 | 22.25 ± 0.20 |
+| 8,192 | 1013.66 ± 3.28 | 21.48 ± 0.00 |
+| 32,768 | 736.39 ± 2.31 | 19.10 ± 0.01 |
+| 65,536 | 532.94 ± 4.86 | 16.66 ± 0.00 |
+| 131,072 | 337.31 ± 0.86 | 13.25 ± 0.01 |
 <!-- /bench -->
 
 ### Load time

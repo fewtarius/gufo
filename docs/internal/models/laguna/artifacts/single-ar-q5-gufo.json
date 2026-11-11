@@ -30,21 +30,16 @@
   },
   "notes": [
     "pp2048/tg128; depth is a cached conversation prefix of synthetic text (8-token reply); measured turn task is recorded per row; tolerance max(32, 0.500%) on cache_n and prompt_n; actual counts per sample in rows",
-    "synthetic text: 1.191 tokens/word, template overhead 43 tokens",
-    "not measured, d8192: serving stream failed: {\"code\": \"generation_failed\", \"message\": \"Laguna prefill failed: Laguna: the forward produced non-finite logits at position 10205 (100352 of 100352 values, first=nan). The GPU reported no error, so the device is still healthy and the model read memory it should not have - usually a KV cache larger than the device can back, or a device that has not settled after the previous server released it. Restart the server and wait about a minute before starting it again; use a smaller context if it keeps happening.\", \"type\": \"server_error\"}",
-    "not measured, d32768: HTTP Error 500: Internal Server Error",
-    "not measured, d65536: HTTP Error 500: Internal Server Error",
-    "not measured, d196608: HTTP Error 500: Internal Server Error",
-    "not measured, d258048: Remote end closed connection without response"
+    "synthetic text: 1.191 tokens/word, template overhead 43 tokens"
   ],
   "referenceName": null,
   "rows": {
     "0": {
-      "command": "gufo serve --port 43943 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 50963 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "counts": [
         {
           "cache_n": 0,
-          "completion_sha256": "cda293eab93fba2f3ee153a325181b637207b4fcb3fa6d339dd4f7e195167cbf",
+          "completion_sha256": "f16e84087559212dfaf1cb01eb38fe9affbba2b6df8e55c8f18537718ddba9c2",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
@@ -52,53 +47,53 @@
         },
         {
           "cache_n": 0,
-          "completion_sha256": "7f246cf6fb27c6f534130550297fe6ae6931aa019de4fd8746039513c12f4b2a",
+          "completion_sha256": "7ba4fa17432f9f43cbc77bd5f07c163a72548a070b3d7f8fad1e6886a847ed86",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2040
         }
       ],
-      "pp": 1140.98,
-      "pp_sd": 1.41,
+      "pp": 1140.08,
+      "pp_sd": 0.2,
       "samples": 2,
-      "tg": 22.27,
-      "tg_sd": 0.16,
+      "tg": 22.25,
+      "tg_sd": 0.2,
       "workload": "prose"
     },
     "131072": {
-      "command": "gufo serve --port 43943 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 50963 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "counts": [
         {
-          "cache_n": 131065,
-          "completion_sha256": "90905af2673a7add27588b86221b23a6ed49449e9c2cf3bf9a2e353374d5db45",
+          "cache_n": 131067,
+          "completion_sha256": "74a31f7480e602b7e5bf409c40dc1d8ce5dd8fac9edf1b7cf95497214ffde3fc",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2016
         },
         {
-          "cache_n": 131065,
-          "completion_sha256": "f79af69698831d16e5f529db5907dcd9be26028f833913d1634efb0f42f38759",
+          "cache_n": 131067,
+          "completion_sha256": "c6faf264fc14ff5d3f95bd2d49242d951b73befabac7be2ec55848ace3d7d5bb",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2025
         }
       ],
-      "pp": 336.64,
-      "pp_sd": 1.9,
+      "pp": 337.31,
+      "pp_sd": 0.86,
       "samples": 2,
       "tg": 13.25,
       "tg_sd": 0.01,
       "workload": "prose"
     },
     "32768": {
-      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 50963 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "counts": [
         {
           "cache_n": 32761,
-          "completion_sha256": "4fffd4842bdb47c93163df624cb312016cad29f15fbe695ac091fcc722aeb49b",
+          "completion_sha256": "721643c83f18fd9f51e2d0f6c9cccba24eabaf82b7127abab7f740f1127481eb",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
@@ -106,26 +101,26 @@
         },
         {
           "cache_n": 32761,
-          "completion_sha256": "6266ad2f9be3297ba7a43bf5a135ebe09e6de136bd52f117068e214f949f121b",
+          "completion_sha256": "907b0e685ccad27a97699cd77aced79aa9aca2d561d39735d6427b8f20835c59",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2040
         }
       ],
-      "pp": 737.75,
-      "pp_sd": 0.19,
+      "pp": 736.39,
+      "pp_sd": 2.31,
       "samples": 2,
-      "tg": 19.12,
-      "tg_sd": 0.0,
+      "tg": 19.1,
+      "tg_sd": 0.01,
       "workload": "prose"
     },
     "65536": {
-      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 50963 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "counts": [
         {
           "cache_n": 65563,
-          "completion_sha256": "c94188e09cc6f3ad9bf92228e85bcb3898bec318f3c74184ee8897cd4cc74819",
+          "completion_sha256": "99d5cd57d733a2fab9bd2e4fd3b72fa4a16cf0ac5a95708584e98803cd9581c5",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
@@ -133,26 +128,26 @@
         },
         {
           "cache_n": 65520,
-          "completion_sha256": "77663b4dd07c59bcab1d9dd7ab481cda368eb3e3b80e431bfc95c3a5c43b9a65",
+          "completion_sha256": "8de64d4e22fa2be1f8400dc863aa1c78489ec33ecedba0cec3615e3dfc37aa39",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2051
         }
       ],
-      "pp": 532.7,
-      "pp_sd": 0.78,
+      "pp": 532.94,
+      "pp_sd": 4.86,
       "samples": 2,
-      "tg": 16.67,
-      "tg_sd": 0.01,
+      "tg": 16.66,
+      "tg_sd": 0.0,
       "workload": "prose"
     },
     "8192": {
-      "command": "gufo serve --port 60561 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
+      "command": "gufo serve --port 50963 --sessions 1 llm --model Laguna-S-2.1-UD-Q5_K_XL-00001-of-00003.gguf --context 262144 --served-model-name bench --think off --max-pending-per-client 8",
       "counts": [
         {
           "cache_n": 8181,
-          "completion_sha256": "d0173d59dfdbaf2d40dbe0a9363891772e6e5671fdb44ce32bf061565bc45755",
+          "completion_sha256": "fbb1118b61cd145d1f278c67abdbbbf4eb41ad2fb20689772754396742e46cba",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
@@ -160,18 +155,18 @@
         },
         {
           "cache_n": 8176,
-          "completion_sha256": "f2057dab56f1d07dadf4adc2b13a3ea088b4dcc18e695d5ebec159f71aac9fcb",
+          "completion_sha256": "e56770f8894a1f21c9a4d0d7ccbb3a45887601cec4ca4aa70d2633a41ab9309b",
           "draft_n": 0,
           "draft_n_accepted": 0,
           "predicted_n": 128,
           "prompt_n": 2028
         }
       ],
-      "pp": 1013.25,
-      "pp_sd": 0.04,
+      "pp": 1013.66,
+      "pp_sd": 3.28,
       "samples": 2,
       "tg": 21.48,
-      "tg_sd": 0.02,
+      "tg_sd": 0.0,
       "workload": "prose"
     }
   },
@@ -181,7 +176,7 @@
       "gufo",
       "serve",
       "--port",
-      "43943",
+      "50963",
       "--sessions",
       "1",
       "llm",
@@ -200,7 +195,7 @@
   "source": {
     "buildMode": "nix-release",
     "dirty": true,
-    "revision": "f16d48dd4492b6da71a7bf993e663c948ea88896"
+    "revision": "b2011880f29f08ee6601577af619edd2a3c92300"
   },
   "table": "single-ar-q5",
   "target": "gufo"

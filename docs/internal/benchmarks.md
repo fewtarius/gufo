@@ -90,18 +90,27 @@ the same table.
 ## Between-run settling
 
 Loading a model that occupies most of the pool, then immediately loading
-another, can produce non-finite logits on the first forward even when the second
-configuration fits. The kernel needs time to reclaim the previous process's
-pages.
+another, can produce a broken first forward even when the second configuration
+fits. The kernel needs time to reclaim the previous process's pages, and a
+server that starts before it has done so gets an allocation that does not match
+reality.
 
-Measured on the Nimo Axis N161: Laguna S 2.1 UD-Q5_K_XL at 262,144 tokens with
-q8_0 K/V failed at position 1 when started 70 seconds after Laguna UD-Q4_K_XL
-released 90 GiB, then loaded unchanged after a longer wait and used 109,195 MiB
-of the 114,688 MiB pool. The failure is a device state, not a result.
+Two symptoms were measured on the Nimo Axis N161, both from the same cause:
 
-Space consecutive large loads by 150 seconds on the Nimo and 90 on the handheld.
-Treat a first-forward NaN right after a previous server exited as unsettled
-until it reproduces after the wait.
+- Non-finite logits at position 1. Laguna S 2.1 UD-Q5_K_XL at 262,144 tokens
+  with q8_0 K/V failed this way when started 70 seconds after Laguna UD-Q4_K_XL
+  released 90 GiB, then loaded unchanged after a longer wait and used 109,195
+  MiB of the 114,688 MiB pool.
+- A GPU queue error rather than a numerical one. Qwen3.8-Flash-Next at its
+  native 262,144 aborted with `HSA_STATUS_ERROR_INVALID_PACKET_FORMAT: The AQL
+  packet is malformed` and `fatal_signal signal=6` on its first request, then
+  completed three consecutive full sweeps at the same context once the device
+  had settled.
+
+Neither is a result. Space consecutive large loads by 150 seconds on the Nimo
+and 90 on the handheld, and treat a first-forward NaN or a queue abort right
+after a previous server exited as unsettled until it reproduces after the wait.
+A model at 95% of the pool makes this more likely, not impossible to avoid.
 
 ## Coverage
 

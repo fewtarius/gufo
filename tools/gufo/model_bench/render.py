@@ -377,8 +377,20 @@ def render_table(config: BenchConfig, table: TableSpec, existing: dict[str, dict
     values = _row_values(config, table)
     better = table.spec.get("better", "higher")
     kind = table.kind
-    lines = ["| " + " | ".join(c.label for c in layout.columns) + " |",
-             "| " + " | ".join(c.align for c in layout.columns) + " |"]
+    # Cells are built in column order, so a gufo-only page can drop the
+    # comparison columns and their cells in one pass over the same indices.
+    columns = layout.columns
+    keep = [i for i, c in enumerate(columns)
+            if not (config.gufo_only and c.owner in ("reference", "gain", "exact"))]
+
+    def header(index: int) -> str:
+        column = columns[index]
+        if config.gufo_only and column.label.startswith("Gufo "):
+            return column.label[len("Gufo "):]
+        return column.label
+
+    lines = ["| " + " | ".join(header(i) for i in keep) + " |",
+             "| " + " | ".join(columns[i].align for i in keep) + " |"]
     unavailable = unavailable_rows(config, table) or set()
     spec_unavailable = unavailable_rows(config, TableSpec(table.id, table.base + "-speculative", table.variant, table.spec)) or set()
     for label in layout.rows:
@@ -417,7 +429,8 @@ def render_table(config: BenchConfig, table: TableSpec, existing: dict[str, dict
                     rt = _ref(fresh.get(f"ref_tg_{name}"),
                               na or bool(fresh.get(f"ref_unavailable_{name}")))
                     cells += [gt, rt, gain(_number(gt), _number(rt), better, rt == NA)]
-                lines.append("| " + " | ".join([label, *cells]) + " |")
+                row = [label, *cells]
+                lines.append("| " + " | ".join(row[i] for i in keep) + " |")
                 continue
             gp = _pick(fresh.get("gufo_pp"), cell("Gufo pp")); gt = _pick(fresh.get("gufo_tg"), cell("Gufo tg"))
             rp = _ref(fresh.get("ref_pp"), na); rt = _ref(fresh.get("ref_tg"), na)
@@ -452,7 +465,8 @@ def render_table(config: BenchConfig, table: TableSpec, existing: dict[str, dict
             cells = [str(_merged_tokens(size)), g, r, gain(_number(g), _number(r), better, r == NA)]
         else:
             raise SystemExit(f"no renderer for table {table.id}")
-        lines.append("| " + " | ".join([label, *cells]) + " |")
+        row = [label, *cells]
+        lines.append("| " + " | ".join(row[i] for i in keep) + " |")
     return "\n".join(lines) + "\n"
 
 

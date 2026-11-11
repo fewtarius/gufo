@@ -1,0 +1,90 @@
+{
+  "schema": "gufo-model-bench/1",
+  "category": "llm",
+  "model": {
+    "id": "Qwen3.6-35B-A3B",
+    "docs": "qwen3.6-35b-a3b",
+    "label": "Qwen3.6-35B-A3B"
+  },
+  "files": {
+    "gguf": "UD-Q4_K_XL GGUF"
+  },
+  "variants": {
+    "default": {
+      "label": "Q4",
+      "requires": [
+        "gguf"
+      ]
+    }
+  },
+  "sampling": {
+    "temperature": 0,
+    "seed": 1
+  },
+  "gufo": {
+    "serve": [],
+    "llm": [
+      "--think",
+      "off",
+      "--max-pending-per-client",
+      "8"
+    ],
+    "readiness": "/ready"
+  },
+  "tables": {
+    "single-ar": {
+      "title": "Single user, autoregressive",
+      "per_variant": false,
+      "prompt_tokens": 2048,
+      "output_tokens": 128,
+      "depths": [
+        0,
+        8192,
+        32768,
+        65536,
+        98304
+      ],
+      "context": 131072,
+      "depth_tolerance": 0.005,
+      "prefix": {
+        "generator": "synthetic-paragraphs",
+        "seed": 1
+      },
+      "repetitions": 2,
+      "metric": "tok/s",
+      "better": "higher"
+    },
+    "loading": {
+      "title": "Loading time",
+      "per_variant": false,
+      "context": 131072,
+      "sessions": 1,
+      "repetitions": 2,
+      "metric": "seconds",
+      "better": "lower",
+      "rows": "variants"
+    },
+    "memory": {
+      "title": "Memory occupation",
+      "per_variant": false,
+      "context": 131072,
+      "workloads": [
+        {
+          "id": "pp2048 + tg128",
+          "depth": 0,
+          "prompt_tokens": 2048,
+          "output_tokens": 128
+        },
+        {
+          "id": "32K prefix, pp4096 + tg128",
+          "depth": 32768,
+          "prompt_tokens": 4096,
+          "output_tokens": 128
+        }
+      ],
+      "metric": "GiB",
+      "better": "lower",
+      "mode": "ar"
+    }
+  }
+}

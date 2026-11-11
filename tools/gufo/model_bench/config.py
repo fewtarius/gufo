@@ -76,7 +76,17 @@ class BenchConfig:
 
     @property
     def reference_name(self) -> str:
-        return self.data["reference"]["name"]
+        reference = self.data.get("reference")
+        return reference["name"] if reference else None
+
+    @property
+    def gufo_only(self) -> bool:
+        """A page with no reference entry measures Gufo alone.
+
+        Rendering then drops the reference and gain columns instead of filling
+        them with TODO, so a model we do not compare stays readable.
+        """
+        return self.reference_name is None
 
     @property
     def speculative(self) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from .config import BenchConfig, TableSpec
 TODO = "TODO"
 NA = "N/A"  # unavailable comparison (see artifacts/unavailable.json)
 MARKER_RE = re.compile(
-    r"<!-- bench:(?P<id>[\w-]+) -->\n(?P<body>.*?)<!-- /bench -->", re.DOTALL
+    r"<!-- bench:(?P<id>[\w@-]+) -->\n(?P<body>.*?)<!-- /bench -->", re.DOTALL
 )
 NUMBER_RE = re.compile(r"[-+]?\d[\d,]*\.?\d*")
 
@@ -476,12 +476,21 @@ def render_document(config: BenchConfig, document: str, only: set[str] | None = 
     rendered: list[str] = []
 
     def replace(match: re.Match[str]) -> str:
-        table_id = match.group("id")
-        if table_id not in known or (only and table_id not in only):
+        # A marker may name an artifact subdirectory, so one page can carry the
+        # same table measured on more than one device: bench:single-ar@flip.
+        raw = match.group("id")
+        table_id, _, subdir = raw.partition("@")
+        if table_id not in known or (only and raw not in only and table_id not in only):
             return match.group(0)
-        body = render_table(config, known[table_id], existing.get(table_id))
-        rendered.append(table_id)
-        return f"<!-- bench:{table_id} -->\n{body}<!-- /bench -->"
+        saved = config.artifacts_override
+        if subdir:
+            config.artifacts_override = config.model_dir / subdir
+        try:
+            body = render_table(config, known[table_id], existing.get(raw))
+        finally:
+            config.artifacts_override = saved
+        rendered.append(raw)
+        return f"<!-- bench:{raw} -->\n{body}<!-- /bench -->"
 
     return MARKER_RE.sub(replace, document), rendered
 

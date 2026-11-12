@@ -1867,6 +1867,243 @@ std::size_t Session::MaxSnapshotBytes() const noexcept {
   return total;
 }
 
+std::uint32_t Session::LayerCount() const noexcept {
+  return impl_->model->config.num_layers;
+}
+
+bool Session::LayerIsFullAttention(std::uint32_t il) const noexcept {
+  return il < impl_->model->config.num_layers &&
+         !impl_->model->config.IsSwa(il);
+}
+
+std::size_t Session::KvRowBytes() const noexcept {
+  return impl_->kv_row_bytes;
+}
+
+std::uint32_t Session::SlidingWindow() const noexcept {
+  return impl_->model->config.sliding_window;
+}
+
+namespace {
+constexpr std::uint32_t kPrivateSnapshotMagic = 0x56524c41;  // "ALRV"
+constexpr std::uint32_t kPrivateSnapshotVersion = 1;
+constexpr std::size_t kPrivateSnapshotHeader = 4 * sizeof(std::uint32_t);
+}  // namespace
+
+std::size_t Session::PrivateSnapshotBytes() const noexcept {
+  const Config& c = impl_->model->config;
+  // A drafter's persistent payload is position-dependent and has no cheap
+  // upper bound here; the adapter keeps its legacy single-payload path.
+  if (impl_->dflash != nullptr)
+    return 0;
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  std::size_t total = kPrivateSnapshotHeader;
+  for (std::uint32_t il = 0; il < c.num_layers; ++il) {
+    if (c.IsSwa(il)) {
+      const std::size_t rows = LiveRows(il, impl_->capacity);
+      total += 2 * rows * kv_row_bytes;
+    } else {
+      total += impl_->PooledSnapshotBytes(il, impl_->capacity);
+    }
+  }
+  total += std::size_t{c.vocab_size} * sizeof(float);
+  return total;
+}
+
+bool Session::SaveKvRows(std::uint32_t il, bool value_cache,
+                         std::uint32_t first, std::uint32_t end,
+                         std::span<std::uint8_t> out,
+                         std::string* error_msg) const {
+  const Config& c = impl_->model->config;
+  if (il >= c.num_layers || c.IsSwa(il))
+    return Fail(error_msg,
+                "Laguna: row capture requires a full-attention layer");
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  if (first > end || end > impl_->capacity)
+    return Fail(error_msg, "Laguna: row capture range is invalid");
+  if (out.size() != std::size_t{end - first} * kv_row_bytes)
+    return Fail(error_msg, "Laguna: row capture buffer has the wrong size");
+  if (hipStreamSynchronize(impl_->stream) != hipSuccess)
+    return Fail(error_msg, "Laguna: device synchronization failed");
+  const auto& cache = value_cache ? impl_->v_cache[il] : impl_->k_cache[il];
+  if (end == first)
+    return true;
+  if (hipMemcpy(out.data(), cache.get() + std::size_t{first} * kv_row_bytes,
+                out.size(), hipMemcpyDeviceToHost) != hipSuccess)
+    return Fail(error_msg, "Laguna: row capture copy failed");
+  return true;
+}
+
+bool Session::LoadKvRows(std::uint32_t il, bool value_cache,
+                         std::uint32_t first, std::uint32_t end,
+                         std::span<const std::uint8_t> in,
+                         std::string* error_msg) {
+  const Config& c = impl_->model->config;
+  if (il >= c.num_layers || c.IsSwa(il))
+    return Fail(error_msg,
+                "Laguna: row restore requires a full-attention layer");
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  if (first > end || end > impl_->capacity)
+    return Fail(error_msg, "Laguna: row restore range is invalid");
+  if (in.size() != std::size_t{end - first} * kv_row_bytes)
+    return Fail(error_msg, "Laguna: row restore buffer has the wrong size");
+  if (end == first)
+    return true;
+  auto& cache = value_cache ? impl_->v_cache[il] : impl_->k_cache[il];
+  if (hipMemcpy(cache.get() + std::size_t{first} * kv_row_bytes, in.data(),
+                in.size(), hipMemcpyHostToDevice) != hipSuccess)
+    return Fail(error_msg, "Laguna: row restore copy failed");
+  return true;
+}
+
+bool Session::SavePrivate(std::span<std::uint8_t> out,
+                          std::string* error_msg) const {
+  const Config& c = impl_->model->config;
+  const std::size_t position = impl_->position;
+  const std::size_t total = PrivateSnapshotBytes();
+  if (total == 0)
+    return Fail(error_msg, "Laguna: private snapshot needs no drafter");
+  if (position == 0)
+    return Fail(error_msg,
+                "Laguna: private snapshot needs a non-empty context");
+  if (out.size() != total)
+    return Fail(error_msg,
+                "Laguna: private snapshot buffer has the wrong size");
+  if (hipStreamSynchronize(impl_->stream) != hipSuccess)
+    return Fail(error_msg, "Laguna: device synchronization failed");
+  const std::uint32_t header[4] = {
+      kPrivateSnapshotMagic, kPrivateSnapshotVersion,
+      static_cast<std::uint32_t>(position), c.num_layers};
+  std::memcpy(out.data(), header, sizeof(header));
+  std::uint8_t* at = out.data() + kPrivateSnapshotHeader;
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  const auto copy_ring = [&](std::uint32_t il,
+                             const DeviceBuffer<std::byte>& cache,
+                             std::size_t rows, std::uint8_t* destination,
+                             std::string* error) -> bool {
+    if (rows == 0)
+      return true;
+    const std::uint32_t first =
+        LiveFirstRow(il, static_cast<std::uint32_t>(position));
+    const std::uint32_t ring_rows =
+        static_cast<std::uint32_t>(cache.bytes() / kv_row_bytes);
+    std::size_t copied = 0;
+    while (copied < rows) {
+      const std::uint32_t start = (first + copied) % ring_rows;
+      const std::size_t chunk =
+          std::min<std::size_t>(rows - copied, ring_rows - start);
+      if (hipMemcpy(destination + copied * kv_row_bytes,
+                    cache.get() + std::size_t{start} * kv_row_bytes,
+                    chunk * kv_row_bytes,
+                    hipMemcpyDeviceToHost) != hipSuccess) {
+        Fail(error, "Laguna: private snapshot copy failed");
+        return false;
+      }
+      copied += chunk;
+    }
+    return true;
+  };
+  for (std::uint32_t il = 0; il < c.num_layers; ++il) {
+    if (c.IsSwa(il)) {
+      const std::size_t rows =
+          LiveRows(il, static_cast<std::uint32_t>(position));
+      const std::size_t region_rows = LiveRows(il, impl_->capacity);
+      const std::size_t region = 2 * region_rows * kv_row_bytes;
+      std::fill(at, at + region, std::uint8_t{0});
+      if (!copy_ring(il, impl_->k_cache[il], rows, at, error_msg))
+        return false;
+      if (!copy_ring(il, impl_->v_cache[il], rows,
+                     at + region_rows * kv_row_bytes, error_msg))
+        return false;
+      at += region;
+    } else {
+      const std::size_t region =
+          impl_->PooledSnapshotBytes(il, impl_->capacity);
+      std::fill(at, at + region, std::uint8_t{0});
+      impl_->SavePooled(il, static_cast<std::uint32_t>(position), at);
+      at += region;
+    }
+  }
+  std::memcpy(
+      at, impl_->h_logits + std::size_t{impl_->logit_rows - 1} * c.vocab_size,
+      std::size_t{c.vocab_size} * sizeof(float));
+  return true;
+}
+
+bool Session::LoadPrivate(std::span<const std::uint8_t> in,
+                          std::uint32_t position, std::string* error_msg) {
+  const Config& c = impl_->model->config;
+  const std::size_t total = PrivateSnapshotBytes();
+  if (total == 0)
+    return Fail(error_msg, "Laguna: private restore needs no drafter");
+  if (in.size() != total)
+    return Fail(error_msg,
+                "Laguna: private snapshot buffer has the wrong size");
+  std::uint32_t header[4];
+  std::memcpy(header, in.data(), sizeof(header));
+  if (header[0] != kPrivateSnapshotMagic ||
+      header[1] != kPrivateSnapshotVersion || header[3] != c.num_layers ||
+      header[2] != position || position == 0 || position > impl_->capacity)
+    return Fail(error_msg,
+                "Laguna: private snapshot does not match this session");
+  if (hipStreamSynchronize(impl_->stream) != hipSuccess)
+    return Fail(error_msg, "Laguna: device synchronization failed");
+  const std::uint8_t* at = in.data() + kPrivateSnapshotHeader;
+  const std::size_t kv_row_bytes = impl_->kv_row_bytes;
+  const auto copy_ring = [&](std::uint32_t il, DeviceBuffer<std::byte>& cache,
+                             std::size_t rows, const std::uint8_t* input,
+                             std::string* error) -> bool {
+    if (rows == 0)
+      return true;
+    const std::uint32_t first = LiveFirstRow(il, position);
+    const std::uint32_t ring_rows =
+        static_cast<std::uint32_t>(cache.bytes() / kv_row_bytes);
+    std::size_t copied = 0;
+    while (copied < rows) {
+      const std::uint32_t start = (first + copied) % ring_rows;
+      const std::size_t chunk =
+          std::min<std::size_t>(rows - copied, ring_rows - start);
+      if (hipMemcpy(cache.get() + std::size_t{start} * kv_row_bytes,
+                    input + copied * kv_row_bytes, chunk * kv_row_bytes,
+                    hipMemcpyHostToDevice) != hipSuccess) {
+        Fail(error, "Laguna: private restore copy failed");
+        return false;
+      }
+      copied += chunk;
+    }
+    return true;
+  };
+  for (std::uint32_t il = 0; il < c.num_layers; ++il) {
+    if (c.IsSwa(il)) {
+      const std::size_t rows = LiveRows(il, position);
+      const std::size_t region_rows = LiveRows(il, impl_->capacity);
+      const std::size_t region = 2 * region_rows * kv_row_bytes;
+      if (!copy_ring(il, impl_->k_cache[il], rows, at, error_msg))
+        return false;
+      if (!copy_ring(il, impl_->v_cache[il], rows,
+                     at + region_rows * kv_row_bytes, error_msg))
+        return false;
+      at += region;
+    } else {
+      const std::size_t region =
+          impl_->PooledSnapshotBytes(il, impl_->capacity);
+      if (impl_->PooledSnapshotBytes(il, position) != 0) {
+        impl_->RestorePooled(il, position, at);
+      } else {
+        // No complete block exists at this position, so the payload carries
+        // no bounds. Drop whatever the slot pooled before: rows past the
+        // restored frontier are about to be overwritten.
+        impl_->sparse_valid_end[il] = 0;
+      }
+      at += region;
+    }
+  }
+  std::memcpy(impl_->h_logits, at, std::size_t{c.vocab_size} * sizeof(float));
+  impl_->logit_rows = 1;
+  impl_->position = position;
+  return true;
+}
+
 bool Session::SaveSnapshot(std::span<std::uint8_t> out,
                            std::string* error_msg) const {
   const Config& c = impl_->model->config;
@@ -2303,6 +2540,35 @@ std::size_t Model::SessionBytesForContext(
       std::max<std::uint32_t>(1, state_->options.prefill_tile);
   return SessionBytesForContextLocked(state_->config, context, tile,
                                       state_->options.kv_cache_type);
+}
+
+std::size_t Model::SessionScratchBytesForContext(
+    std::uint32_t context, std::uint32_t tile) const noexcept {
+  const Config& c = state_->config;
+  const std::size_t kv_row = std::size_t{c.num_kv} * c.head_dim;
+  const std::size_t kv_row_bytes =
+      state_->options.kv_cache_type == KvCacheType::kQ8_0
+          ? rocm::detail::Q8KvRowBytes(static_cast<std::uint32_t>(kv_row))
+          : kv_row * sizeof(__half);
+  const std::uint32_t max_heads =
+      *std::max_element(c.heads.begin(), c.heads.end());
+  const std::size_t q_row = std::size_t{max_heads} * c.head_dim;
+  const bool sparse_attn = std::getenv("LAGUNA_SPARSE_ATTN") != nullptr;
+  const std::size_t drafter_bytes =
+      (state_->dflash_model != nullptr && !state_->dflash_taps.empty())
+          ? std::size_t{state_->dflash_window + Session::kMaxVerifyRows} *
+                state_->dflash_taps.size() * c.hidden_size * sizeof(float)
+          : 0;
+  return SessionScratchBytes(c, context, std::max<std::uint32_t>(1, tile),
+                             q_row, kv_row, sparse_attn, drafter_bytes);
+}
+
+std::uint32_t Model::PrefillTile() const noexcept {
+  return std::max<std::uint32_t>(1, state_->options.prefill_tile);
+}
+
+void Model::SetPrefillTile(std::uint32_t tile) noexcept {
+  state_->options.prefill_tile = std::max<std::uint32_t>(1, tile);
 }
 
 std::size_t Model::FreeDeviceBytes() noexcept {

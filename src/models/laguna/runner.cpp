@@ -897,6 +897,40 @@ std::shared_ptr<ext::TextModelRunner> CreateLagunaTextRunner(
       }
     }
   }
+  // Size the prefill tile to the requested sessions. The default fills the
+  // routed-expert GEMM, but its scratch is per session and on a unified-memory
+  // APU comes out of the same pool. When several sessions would not fit with
+  // the default, halve the tile until they do, leaving a tenth of the free
+  // pool to the OS and the cache. An explicit LAGUNA_PREFILL_TILE wins.
+  if (std::getenv("LAGUNA_PREFILL_TILE") == nullptr &&
+      options.session_count > 1) {
+    const auto free_bytes = LagunaModel::FreeDeviceBytes();
+    if (free_bytes != 0) {
+      constexpr std::uint32_t kDefaultTile = 16384;
+      const auto context = max_context + LagunaSession::kMaxVerifyRows;
+      const auto kv = model->SessionBytesForContext(context);
+      const std::size_t reserve =
+          std::max<std::size_t>(free_bytes / 10, std::size_t{1} << 30);
+      const auto need = [&](std::uint32_t tile) {
+        return options.session_count *
+               (kv + model->SessionScratchBytesForContext(context, tile));
+      };
+      std::uint32_t tile = kDefaultTile;
+      while (tile > 1024 && need(tile) + reserve > free_bytes)
+        tile /= 2;
+      if (tile != kDefaultTile) {
+        Logger::Info(
+            "loader",
+            "event=prefill_tile_adapted from_tokens=" +
+                std::to_string(kDefaultTile) +
+                " to_tokens=" + std::to_string(tile) +
+                " sessions=" + std::to_string(options.session_count) +
+                " free_mib=" + std::to_string(free_bytes / (1024 * 1024)) +
+                " need_mib=" + std::to_string(need(tile) / (1024 * 1024)));
+        model->SetPrefillTile(tile);
+      }
+    }
+  }
   auto tokenizer =
       tokenization::QwenTokenizer::CreateFromGguf(*options.reader, &load_error);
   if (tokenizer == nullptr) {

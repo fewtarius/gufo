@@ -48,6 +48,14 @@ frontiers are private, as are logits and the DSpark windows, so a checkpoint
 carries a fixed private cost whatever its depth. Rows are copied at capture
 rather than borrowed, because compressed caches grow by reallocation.
 
+Laguna S 2.1, without a drafter, stores each full-attention layer's K and V as
+append rows and keeps the sliding-window rings, pooled keys and logits in one
+private payload of about 40 MiB at `q8_0`. A checkpoint copies only the rows
+past its predecessor instead of re-copying the prefix, so a new turn at depth
+costs the rows it adds. See [the model page](models/laguna/CACHE.md). A loaded
+drafter keeps the earlier single-payload representation, because its
+persistent payload has no fixed upper bound.
+
 ## Why it exists
 
 Prefill cost scales with prompt length. Decode cost scales with tokens

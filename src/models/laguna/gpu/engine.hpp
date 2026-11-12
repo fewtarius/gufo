@@ -104,12 +104,43 @@ public:
                                      std::string* error_msg);
 
   /// Bumped when the payload layout changes.
-  /// Bumped when the payload layout changes. Version 2 records the KV cache
-  /// format in the header, so a snapshot taken in one format is rejected
-  /// rather than restored into the other. Version 3 also carries the pooled
-  /// block bounds, so a restore does not have to re-derive them from the
-  /// whole KV cache.
+  /// Version 2 records the KV cache format in the header, so a snapshot taken
+  /// in one format is rejected rather than restored into the other. Version 3
+  /// also carries the pooled block bounds, so a restore does not have to
+  /// re-derive them from the whole KV cache.
   static constexpr std::uint32_t kSnapshotPayloadVersion = 3;
+
+  // Component-cache geometry. Full-attention layers expose append rows (their
+  // K/V is final once written and checkpoints share it); sliding-window layers
+  // and the pooled keys, logits and drafter are one private payload.
+  [[nodiscard]] std::uint32_t LayerCount() const noexcept;
+  [[nodiscard]] bool LayerIsFullAttention(std::uint32_t il) const noexcept;
+  [[nodiscard]] std::size_t KvRowBytes() const noexcept;
+  [[nodiscard]] std::uint32_t SlidingWindow() const noexcept;
+
+  /// Copies absolute rows [first, end) of one full-attention cache (K or V)
+  /// of layer `il` to host memory.
+  [[nodiscard]] bool SaveKvRows(std::uint32_t il, bool value_cache,
+                                std::uint32_t first, std::uint32_t end,
+                                std::span<std::uint8_t> out,
+                                std::string* error_msg) const;
+  /// Restores the rows copied by SaveKvRows. Writes the device cache directly
+  /// and does not change the session position.
+  [[nodiscard]] bool LoadKvRows(std::uint32_t il, bool value_cache,
+                                std::uint32_t first, std::uint32_t end,
+                                std::span<const std::uint8_t> in,
+                                std::string* error_msg);
+
+  /// Host bytes the position-independent private payload needs: the
+  /// sliding-window rings at their live window, the pooled block bounds at
+  /// full capacity, the last logits, and a small header. Zero when a drafter
+  /// is loaded; the adapter keeps its legacy single-payload path then.
+  [[nodiscard]] std::size_t PrivateSnapshotBytes() const noexcept;
+  [[nodiscard]] bool SavePrivate(std::span<std::uint8_t> out,
+                                 std::string* error_msg) const;
+  [[nodiscard]] bool LoadPrivate(std::span<const std::uint8_t> in,
+                                 std::uint32_t position,
+                                 std::string* error_msg);
 
 private:
   friend class Model;
@@ -155,6 +186,17 @@ public:
   /// allocates, so the two never disagree about the requirement.
   [[nodiscard]] std::size_t SessionBytesForContext(
       std::uint32_t context) const noexcept;
+
+  /// Device scratch bytes a session of `context` tokens allocates beside its
+  /// KV cache for a prefill tile of `tile`. Used to pick a tile that leaves
+  /// host headroom for every requested session.
+  [[nodiscard]] std::size_t SessionScratchBytesForContext(
+      std::uint32_t context, std::uint32_t tile) const noexcept;
+
+  /// Tokens one prefill pass processes, shared by the engine sessions, the
+  /// runner's chunking and the adapter's prefill plan.
+  [[nodiscard]] std::uint32_t PrefillTile() const noexcept;
+  void SetPrefillTile(std::uint32_t tile) noexcept;
 
   /// Device bytes currently free, as the driver reports them.
   [[nodiscard]] static std::size_t FreeDeviceBytes() noexcept;

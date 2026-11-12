@@ -21,11 +21,11 @@ namespace gufo::models::laguna {
 
 /// Bridges the Laguna session snapshot to the component cache.
 ///
-/// A Laguna session is one flat snapshot: the attention KV caches, the last
-/// logits and the drafter's injected context are saved and restored as a
-/// single private payload. There are no append-row components, so prefix
-/// reuse is exact-boundary only, which is what the previous continuation
-/// cache did.
+/// Without a drafter, full-attention K/V is exposed as append-row components,
+/// so a checkpoint costs only the rows past its predecessor and the rows are
+/// shared. The sliding-window rings, pooled keys and last logits are one small
+/// private payload. A loaded drafter keeps the legacy single-payload path,
+/// because its persistent payload has no cheap fixed upper bound here.
 class LagunaComponentAdapter final : public cache::Adapter {
 public:
   LagunaComponentAdapter(std::shared_ptr<gpu::Model> model,
@@ -95,16 +95,27 @@ public:
 
 private:
   class SlotState;
+  struct ComponentInfo {
+    cache::ComponentId id;
+    std::uint32_t layer;
+    bool value_cache;
+    bool private_state;
+  };
   [[nodiscard]] SlotState& As(cache::Slot&) const;
   [[nodiscard]] const SlotState& As(const cache::Slot&) const;
   [[nodiscard]] const cache::ComponentDescriptor& Component(
       cache::ComponentId) const;
+  [[nodiscard]] const ComponentInfo& Info(cache::ComponentId) const;
 
   std::shared_ptr<gpu::Model> model_;
   std::uint32_t max_context_;
   std::size_t state_bytes_{0};
+  std::size_t kv_row_bytes_{0};
+  std::size_t private_bytes_{0};
+  bool decomposed_{false};
   cache::Identity identity_;
   std::vector<cache::ComponentDescriptor> descriptors_;
+  std::vector<ComponentInfo> components_;
 };
 
 }  // namespace gufo::models::laguna

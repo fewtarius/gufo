@@ -210,6 +210,53 @@ void BudgetUsesAllocatedSlotsInsteadOfLazyStateClaim() {
     assert(request.SelectNext().token != 0);
   }
 }
+
+// The automatic budget is half of what the host has left, which already
+// leaves the other half as the reserve. A host short of the fixed 4 GiB
+// explicit-budget headroom reports a zero ceiling. The runner must not apply
+// that ceiling to an automatic budget, or the cache is disabled instead of
+// trimmed to what the host can hold.
+void AutomaticBudgetIgnoresTheExplicitHeadroom() {
+  class ClaimingRunner final : public Runner {
+  public:
+    mutable std::size_t committed{};
+    mutable std::size_t limit{};
+    TextRunnerResourceClaim ResourceClaim() const override {
+      auto claim = Runner::ResourceClaim();
+      claim.state_capacity_bytes = 4ULL << 30;
+      claim.per_request_state_bytes = 256;
+      claim.temporary_scratch_bytes = 0;
+      // Half of what remains is 8 MiB; nothing remains above the 4 GiB
+      // reserve, so the explicit ceiling is zero.
+      claim.retained_snapshot_capacity_bytes = 8ULL << 20;
+      claim.retained_snapshot_ceiling_bytes = 0;
+      return claim;
+    }
+    std::unique_ptr<ComponentCacheResources> CreateComponentCacheResources(
+        cache::ResourceLedger& ledger, std::size_t ram) const override {
+      auto resources = Runner::CreateComponentCacheResources(ledger, ram);
+      resources->commit_backing = [this, &ledger](std::size_t budget) {
+        committed = budget;
+        limit = ledger.Limits().ram_bytes;
+      };
+      return resources;
+    }
+  };
+  auto runner = std::make_shared<ClaimingRunner>();
+  TextRunnerPool pool(runner, 1);
+  assert(runner->committed == 8ULL << 20);
+  assert(runner->limit == 8ULL << 20);
+  // An explicit budget above the ceiling is still refused, with the host
+  // reserve named: the user asked for more than the host can hold.
+  bool refused = false;
+  try {
+    TextRunnerPool explicit_pool(std::make_shared<ClaimingRunner>(), 1, {},
+                                 {.capacity_bytes = 64ULL << 20});
+  } catch (const std::runtime_error&) {
+    refused = true;
+  }
+  assert(refused);
+}
 void Prefill(TextRunnerPool::Request& request) {
   while (!request.prefill_complete())
     (void)request.Prefill(8);
@@ -3092,6 +3139,7 @@ int main() {
   RefusedFrontierServesFromShallowerBoundary();
   CompletedCancelledPromptGetsARetrySnapshot();
   BudgetUsesAllocatedSlotsInsteadOfLazyStateClaim();
+  AutomaticBudgetIgnoresTheExplicitHeadroom();
   InPassCapturePreservesBoundaryAndLiveTail();
   AlignedPrefillKeepsAlignedBoundaries();
   UnalignedPromptEndPublishesBeforeDroppingTheFrontier();

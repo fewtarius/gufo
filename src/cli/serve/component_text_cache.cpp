@@ -310,24 +310,30 @@ struct ComponentTextCache::Impl {
       automatic_bytes =
           std::min(TextRunnerRamCacheOptions::kAutomaticMaxBytes, automatic);
       // Staging is pinned host memory too, so the host keeps its reserve
-      // only if both fit under the ceiling.
+      // only if both fit under the limit that applies.
       const auto staging = ledger.Limits().staging_bytes;
       const auto requested = ram;
-      max_bytes = ceiling > staging ? ceiling - staging : 0;
+      // An automatic budget is already half the post-slot host, so it leaves
+      // the OS half the remaining RAM. The fixed 4 GiB floor belongs to an
+      // explicit budget, which asks for a specific amount and must not
+      // encroach on the reserve. Applying the fixed floor to the automatic
+      // budget turned a host with a few GiB free into a zero-byte cache and
+      // disabled checkpoints entirely instead of trimming them. Pins are
+      // charged on top of the budget, so the cap for both is budget + pins.
+      const auto cap = automatic_ram ? automatic_bytes + pinned : ceiling;
+      max_bytes = cap > staging ? cap - staging : 0;
       ram = std::min(ram, max_bytes);
-      if (automatic_ram)
-        ram = std::min(ram, automatic);
       // Within the host ceiling and the limit the slots allocated under. Other
       // charges above the budget are refused here, as without pins.
       limit = std::min({ram + pinned, max_bytes, ledger.Limits().ram_bytes});
       const auto charged = ledger.Snapshot().ram_bytes;
       const auto granted = std::min(ram, limit > pinned ? limit - pinned : 0);
-      // The ceiling is measured after the slots allocated. When they leave
-      // no RAM for the cache above the host reserve, refuse the load with
-      // the remedies instead of serving without the cache the user expects
-      // (#1053). An explicit budget below the other charges is the
+      // The ceiling is measured after the slots allocated. When an explicit
+      // budget leaves no RAM for the cache above the host reserve, refuse the
+      // load with the remedies instead of serving without the cache the user
+      // expects (#1053). An explicit budget below the other charges is the
       // operator's setting, not the host's state.
-      const bool host_bound = automatic_ram || ram < requested;
+      const bool host_bound = !automatic_ram && ram < requested;
       if (max_bytes < charged || !granted || (limit < charged && host_bound))
         throw std::runtime_error(HostReserveMessage(
             count, requested, max_bytes > pinned ? max_bytes - pinned : 0));

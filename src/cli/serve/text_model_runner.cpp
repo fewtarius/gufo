@@ -304,11 +304,22 @@ struct TextRunnerPool::Impl {
       // the refusal, because there the user made a request the host cannot
       // honour.
       const bool automatic_ram = !ram_cache_options.capacity_bytes;
+      // An explicit budget is what the user asked for, bounded by the host
+      // ceiling: available RAM above the fixed 4 GiB reserve. The automatic
+      // budget is already half of what remains, so that reserve would clamp
+      // it a second time and, with the host short of the reserve, reduce it
+      // to zero. That turned a small automatic cache into no cache at all.
+      // The cache sizes an automatic budget from the same half-of-what-
+      // remains figure, so the runner passes it through unclamped.
+      const auto ledger_ceiling =
+          automatic_ram ? std::max(automatic, requested) : ceiling;
+      const auto budget =
+          automatic_ram ? requested : std::min(requested, ceiling);
       const auto build = [&](bool ram_enabled) {
         return std::make_unique<ComponentTextCache>(
-            validated.runner, state_count, std::min(requested, ceiling),
-            disk_cache_options, automatic_ram,
-            std::max(ceiling, ComponentTextCache::kOffMetadataBytes),
+            validated.runner, state_count, budget, disk_cache_options,
+            automatic_ram,
+            std::max(ledger_ceiling, ComponentTextCache::kOffMetadataBytes),
             ram_enabled);
       };
       try {

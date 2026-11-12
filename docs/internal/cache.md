@@ -401,13 +401,17 @@ RAM, no shared-prefix or branch checkpoint, and no retained history. With
 bounded 512 MiB backing, so `backing_prepared` appears in that case only. The
 startup line reports `ram_cache=off capacity_bytes=0`.
 
-When the sessions leave no RAM for the cache above the 4 GiB host reserve,
-the server refuses to load with that reason and the remedies: fewer
-`--sessions`, a smaller `--context`, or `--cache-ram-bytes off`. `off` loads
-even when the host is already below its reserve before the sessions allocate.
-When an explicit value is only partly available, the server loads with what
-the host allows and logs `event=ram_cache_trimmed` with the requested and the
-granted bytes; the same remedies restore the full budget.
+An explicit `--cache-ram-bytes` the host cannot hold is trimmed to what remains
+after the sessions allocate, and the server logs `event=ram_cache_trimmed` with
+the requested and the granted bytes. An explicit value that leaves nothing
+above the 4 GiB reserve refuses the load with that reason and the remedies:
+fewer `--sessions`, a smaller `--context`, or `--cache-ram-bytes off`. An
+automatic budget is half of what remains, which already leaves the other half
+as the reserve, so the 4 GiB floor is not applied to it again; when even the
+automatic budget leaves nothing, the server serves without checkpoints and logs
+`event=ram_cache_refused`, because there is nothing the user can change about
+the host. `off` loads even when the host is already below its reserve before
+the sessions allocate.
 
 `--cache-ram-bytes 0` selects automatic sizing. Zero does not disable reuse.
 A positive value replaces the automatic budget and may exceed it: it trades the

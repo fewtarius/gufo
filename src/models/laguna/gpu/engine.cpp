@@ -17,6 +17,7 @@
 #include "src/models/laguna/gpu/device_model.hpp"
 #include "src/models/laguna/gpu/kernels/kernels.hpp"
 #include "src/models/laguna/gpu/kernels/kv_q8.hpp"
+#include "src/models/laguna/pooled_layout.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/state.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
@@ -24,6 +25,9 @@
 
 namespace gufo::models::laguna::gpu {
 namespace {
+
+static_assert(sizeof(__half) == kPooledValueBytes,
+              "the pooled snapshot layout assumes a two-byte value");
 
 // KV cache bytes for a session of `context` tokens. The sliding-window
 // layers hold a ring of sliding_window + 2*tile rows; the full-attention
@@ -349,8 +353,8 @@ std::size_t SessionScratchBytes(const Config& config, std::uint32_t capacity,
       if (!config.IsSwa(il))
         ++full_layers;
     }
-    sparse_elems =
-        full_layers * static_cast<std::size_t>(config.num_kv) * blocks * 256;
+    sparse_elems = full_layers * static_cast<std::size_t>(config.num_kv) *
+                   blocks * kPooledBlockValues;
   }
 
   return f32_elems * sizeof(float) + i32_elems * sizeof(std::int32_t) +
@@ -689,7 +693,7 @@ bool Session::Impl::Init(std::uint32_t max_context, std::string* error_msg) {
     for (std::uint32_t il = 0; il < c.num_layers && ok; ++il) {
       if (!c.IsSwa(il)) {
         ok = sparse_pooled[il].Allocate(std::size_t{c.num_kv} *
-                                        sparse_max_blocks * 256);
+                                        sparse_max_blocks * kPooledBlockValues);
       }
     }
   }
@@ -2323,18 +2327,14 @@ std::size_t Session::Impl::PooledSnapshotBytes(
     return 0;
   if (il >= sparse_pooled.size() || sparse_pooled[il].get() == nullptr)
     return 0;
-  const std::uint32_t blocks =
-      std::min<std::uint32_t>((position + 63) / 64, sparse_max_blocks);
+  const std::uint32_t blocks = PooledBlocks(position);
   if (blocks == 0)
     return 0;
-  return static_cast<std::size_t>(model->config.num_kv) * blocks * 256 *
-         sizeof(__half);
+  return PooledRegionBytes(model->config.num_kv, blocks);
 }
 
 std::size_t Session::Impl::PooledBlocks(std::uint32_t position) const noexcept {
-  if (sparse_max_blocks == 0)
-    return 0;
-  return std::min<std::uint32_t>((position + 63) / 64, sparse_max_blocks);
+  return PooledBlocksAt(position, sparse_max_blocks);
 }
 
 void Session::Impl::SavePooled(std::uint32_t il, std::uint32_t position,
@@ -2343,15 +2343,15 @@ void Session::Impl::SavePooled(std::uint32_t il, std::uint32_t position,
   if (blocks == 0 || sparse_pooled[il].get() == nullptr)
     return;
   const std::size_t kv = model->config.num_kv;
-  const std::size_t stride = static_cast<std::size_t>(sparse_max_blocks) * 256;
+  const std::size_t stride =
+      static_cast<std::size_t>(sparse_max_blocks) * kPooledBlockValues;
+  const std::size_t bytes = PooledHeadBytes(blocks);
   for (std::size_t head = 0; head < kv; ++head) {
-    if (hipMemcpy(out + head * blocks * 256 * sizeof(__half),
-                  sparse_pooled[il].get() + head * stride,
-                  static_cast<std::size_t>(blocks) * 256 * sizeof(__half),
+    if (hipMemcpy(out + PooledHeadOffset(head, blocks),
+                  sparse_pooled[il].get() + head * stride, bytes,
                   hipMemcpyDeviceToHost) != hipSuccess) {
       return;
     }
-    out += static_cast<std::size_t>(blocks) * 256 * sizeof(__half);
   }
 }
 
@@ -2361,15 +2361,15 @@ void Session::Impl::RestorePooled(std::uint32_t il, std::uint32_t position,
   if (blocks == 0 || sparse_pooled[il].get() == nullptr)
     return;
   const std::size_t kv = model->config.num_kv;
-  const std::size_t stride = static_cast<std::size_t>(sparse_max_blocks) * 256;
+  const std::size_t stride =
+      static_cast<std::size_t>(sparse_max_blocks) * kPooledBlockValues;
+  const std::size_t bytes = PooledHeadBytes(blocks);
   for (std::size_t head = 0; head < kv; ++head) {
     if (hipMemcpy(sparse_pooled[il].get() + head * stride,
-                  in + head * blocks * 256 * sizeof(__half),
-                  static_cast<std::size_t>(blocks) * 256 * sizeof(__half),
+                  in + PooledHeadOffset(head, blocks), bytes,
                   hipMemcpyHostToDevice) != hipSuccess) {
       return;
     }
-    in += static_cast<std::size_t>(blocks) * 256 * sizeof(__half);
   }
   // The restored bounds cover every block that exists at this position, so
   // the next append only has to pool the tail of the last partial block.

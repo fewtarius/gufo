@@ -23,6 +23,16 @@ if(TARGET gufo_laguna)
   target_include_directories(laguna_settle_test PRIVATE ${PROJECT_SOURCE_DIR})
   add_test(NAME laguna.settle COMMAND laguna_settle_test)
   set_tests_properties(laguna.settle PROPERTIES LABELS "cpu;laguna")
+
+  # The pooled-key snapshot layout is arithmetic, so it is checkable without a
+  # device. A doubled head stride used to put the deeper segments past the
+  # payload's region, which only showed up once a checkpoint was deep enough
+  # for the overrun to leave the reserved bytes.
+  add_executable(laguna_pooled_layout_test pooled_layout_test.cpp)
+  target_include_directories(laguna_pooled_layout_test
+    PRIVATE ${PROJECT_SOURCE_DIR})
+  add_test(NAME laguna.pooled_layout COMMAND laguna_pooled_layout_test)
+  set_tests_properties(laguna.pooled_layout PROPERTIES LABELS "cpu;laguna")
 endif()
 
 if(ENGINE_ENABLE_HIP AND TARGET gufo_laguna_hip)

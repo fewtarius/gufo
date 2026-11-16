@@ -2551,10 +2551,6 @@ std::size_t Model::SessionScratchBytesForContext(
     std::uint32_t context, std::uint32_t tile) const noexcept {
   const Config& c = state_->config;
   const std::size_t kv_row = std::size_t{c.num_kv} * c.head_dim;
-  const std::size_t kv_row_bytes =
-      state_->options.kv_cache_type == KvCacheType::kQ8_0
-          ? rocm::detail::Q8KvRowBytes(static_cast<std::uint32_t>(kv_row))
-          : kv_row * sizeof(__half);
   const std::uint32_t max_heads =
       *std::max_element(c.heads.begin(), c.heads.end());
   const std::size_t q_row = std::size_t{max_heads} * c.head_dim;

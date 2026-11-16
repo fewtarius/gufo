@@ -22,9 +22,19 @@ namespace gufo::ext {
     const std::filesystem::path& root, std::string_view membership_text,
     std::uint64_t host_available);
 /// Automatic snapshot budget: half the host RAM available after loading
-/// (excluding free CMA pages), after cgroup limits.
+/// (excluding free CMA pages), after cgroup limits. Read once, where the cache
+/// is constructed; it is not re-measured as the session consumes RAM.
 [[nodiscard]] std::size_t HostSnapshotBudgetBytes();
-/// RAM always left to the OS and other processes by an explicit cache limit.
+/// RAM an explicit --cache-ram-bytes leaves to the host's other users: the
+/// kernel, the desktop and every other process's resident memory.
+///
+/// Not a device reservation, and no device path needs one. A firmware carveout
+/// is absent from MemTotal, so it never competes for the pool this protects.
+/// GTT pages are charged against MemAvailable as the driver faults them in, so
+/// an availability figure already nets out what the device holds at the moment
+/// it is read. What remains at risk is growth after the read: on a unified
+/// memory host the window and this budget are caps on overlapping bytes, and
+/// neither is sized from the other.
 inline constexpr std::uint64_t kHostSnapshotHeadroomBytes = std::uint64_t{4}
                                                             << 30;
 /// Most an explicit --cache-ram-bytes may claim: available host RAM minus

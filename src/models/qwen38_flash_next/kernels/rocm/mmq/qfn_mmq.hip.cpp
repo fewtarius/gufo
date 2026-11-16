@@ -717,6 +717,12 @@ extern "C" int qfn_mmq_quantize_q8_1(
         return -1;
     }
     const int64_t ne10_padded = GGML_PAD((int64_t)K, MATRIX_ROW_PADDING);
+    // hipGetLastError reports, and clears, any error left unchecked by an
+    // earlier call, so without this the return value below blamed whichever
+    // function happened to check first rather than the launch that failed.
+    // "Q8_0 vec activation quantization failed" was reported for a launch that
+    // had not failed at all, hiding the real fault upstream.
+    (void)hipGetLastError();
     quantize_row_q8_1_hip(
         X_f32, nullptr, X_q8, GGML_TYPE_Q8_0, K,
         (int64_t)K, (int64_t)K * N, (int64_t)K * N,

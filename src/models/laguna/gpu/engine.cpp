@@ -216,12 +216,17 @@ public:
   }
 
   bool Allocate(std::size_t count) {
-    Reset();
-    if (hipMalloc(reinterpret_cast<void**>(&ptr_), count * sizeof(T)) !=
-        hipSuccess) {
-      ptr_ = nullptr;
+    // Allocate before releasing. Freeing first made a transient failure (device
+    // memory pressure) destroy a buffer the caller still held, and left any
+    // caller that caches keyed on this storage - the activation quantization
+    // caches key on inputs and dimensions rather than the pointer - describing
+    // memory that no longer existed.
+    T* fresh = nullptr;
+    if (hipMalloc(reinterpret_cast<void**>(&fresh), count * sizeof(T)) !=
+        hipSuccess)
       return false;
-    }
+    Reset();
+    ptr_ = fresh;
     count_ = count;
     return true;
   }

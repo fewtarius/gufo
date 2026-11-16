@@ -39,6 +39,11 @@ target_link_libraries(cache_prefix_index_test PRIVATE gufo_cache)
 add_test(NAME cache_prefix_index_test COMMAND cache_prefix_index_test)
 set_tests_properties(cache_prefix_index_test PROPERTIES LABELS "cpu;cache" TIMEOUT 30)
 
+add_executable(cache_host_pressure_test host_pressure_test.cpp)
+target_link_libraries(cache_host_pressure_test PRIVATE gufo_cache)
+add_test(NAME cache_host_pressure_test COMMAND cache_host_pressure_test)
+set_tests_properties(cache_host_pressure_test PROPERTIES LABELS "cpu;cache" TIMEOUT 30)
+
 if (GUFO_BUILD_TOOLS)
   add_executable(cache_slot_bench slot_bench.cpp)
   target_link_libraries(cache_slot_bench PRIVATE gufo_cache_fake)

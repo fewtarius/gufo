@@ -4,23 +4,64 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <numeric>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 
 #include "src/cache/disk_catalog.hpp"
+#include "src/cache/host_pressure.hpp"
 #include "src/cache/retention.hpp"
 #include "src/cli/serve/logging.hpp"
 #include "src/cli/serve/text_model_runner.hpp"
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/platform/os_info.hpp"
+#include "src/ext/host_budget.hpp"
 
 namespace gufo::server {
 namespace {
 using Clock = std::chrono::steady_clock;
+
+// Host availability is re-read at most this often. One turn captures several
+// checkpoints milliseconds apart and the host does not change its mind that
+// fast, so a tighter window only pays for the same answer again.
+constexpr auto kPressureSampleInterval = std::chrono::milliseconds(25);
+
+// Minimum spacing between actual evictions. Checkpoint backing is pinned host
+// memory (hipHostMallocCoherent), so a trim frees GiB of it and the next
+// capture allocates it again. On a workload whose single checkpoint exceeds the
+// ceiling that cycle would repeat every request: one run freed and re-took 48
+// GiB of pinned backing in 13 minutes while prefill was running. Sampling stays
+// cheap; eviction is what has to be rare.
+constexpr auto kPressureTrimInterval = std::chrono::seconds(30);
+
+/// Host RAM available right now, after CMA and cgroup limits, or nullopt when
+/// the host cannot say. Reads the same sources as the load-time budget through
+/// the pure parsers, so the two agree on what "available" means.
+///
+/// Nullopt matters: the load-time path falls back to a coarser figure when
+/// /proc/meminfo is unreadable, which is right once at startup and wrong as a
+/// pressure signal, because it would trim a cache on a read failure. A host
+/// with no /proc (Windows builds) reports nullopt and pressure stays inert.
+[[nodiscard]] std::optional<std::uint64_t> SampleAvailableRamBytes() {
+  std::ifstream meminfo("/proc/meminfo");
+  std::ostringstream meminfo_text;
+  meminfo_text << meminfo.rdbuf();
+  const auto parsed = ext::MeminfoAvailableBytes(meminfo_text.str());
+  if (!parsed)
+    return std::nullopt;
+  std::ifstream membership("/proc/self/cgroup");
+  std::ostringstream membership_text;
+  membership_text << membership.rdbuf();
+  return ext::CgroupAvailableBytes("/sys/fs/cgroup", membership_text.str(),
+                                   *parsed);
+}
+
 class SettledSignal final : public cache::CompletionSignal {
 public:
   bool Ready() const noexcept override { return true; }
@@ -232,6 +273,19 @@ struct ComponentTextCache::Impl {
   std::size_t disk_backing{};
   bool ram_enabled{true};
   cache::ResourceCharge metadata;
+  // Host RAM pressure. The budget above is chosen once, from a host reading
+  // taken while the model was still committing, so it counts as free the RAM
+  // that the sessions' own state and this cache's captures then consume. These
+  // hold what the host says now. The ceiling is stored so a turn that samples
+  // twice decides the same way, and so the log reports a change in pressure
+  // rather than a poll.
+  std::optional<Clock::time_point> pressure_sample_at{};
+  std::optional<Clock::time_point> pressure_trimmed_at{};
+  std::optional<std::size_t> pressure_ceiling{};
+  // Reclaims a single pressure episode may perform. A record pinned elsewhere
+  // is removed while freeing nothing, so held bytes need not fall on every
+  // pass, and an unbounded loop would stall the request that triggered it.
+  static constexpr std::size_t kPressureTrimPassLimit = 16;
 
   Impl(std::shared_ptr<TextModelRunner> runner, std::size_t count,
        std::size_t ram, std::size_t slot_ceiling,
@@ -537,6 +591,90 @@ struct ComponentTextCache::Impl {
     std::copy_n(bytes.begin(), file.size(), file.begin());
     return file;
   }
+  // Hold the retention ceiling to what the host can currently afford, and
+  // reclaim a margin-sized overshoot. Called with mutex held.
+  //
+  // The budget is a reading of host availability taken while the model was
+  // still committing, and on a unified memory host the device window draws from
+  // the same RAM. Measured on a 124 GiB box running one 262144-token session:
+  // the cache was granted 7680 MiB, and the host's tightest reading over the
+  // rest of that run was 7879 MiB. The cache was therefore allowed to grow to
+  // within 199 MiB of everything the host had left, and nothing would have
+  // noticed, because eviction compares holdings against the budget and never
+  // against the host.
+  void ApplyHostPressure(const cache::RetentionRequest& turn) {
+    if (!ram_enabled || budget == 0)
+      return;
+    const auto now = Clock::now();
+    if (pressure_sample_at &&
+        now - *pressure_sample_at < kPressureSampleInterval)
+      return;
+    pressure_sample_at = now;
+    const auto held = retention.RetainedPayloadBytes();
+    const auto verdict = cache::HostPressure(budget, SampleAvailableRamBytes(),
+                                             kHostSnapshotHeadroomBytes, held);
+    const auto previous = pressure_ceiling;
+    pressure_ceiling = verdict.ram_ceiling_bytes;
+    retention.SetHostRamCeiling(verdict.ram_ceiling_bytes);
+    if (!verdict.should_trim) {
+      // Report a movement in the ceiling, not a poll. Both values are logged so
+      // the direction is readable without knowing how the comparison reads.
+      if (previous && *previous != verdict.ram_ceiling_bytes)
+        Logger::Info(
+            "cache",
+            "schema=component-cache-v1 event=host_pressure "
+            "ceiling_bytes=" +
+                std::to_string(verdict.ram_ceiling_bytes) +
+                " previous_ceiling_bytes=" + std::to_string(*previous) +
+                " held_bytes=" + std::to_string(held));
+      return;
+    }
+    if (pressure_trimmed_at &&
+        now - *pressure_trimmed_at < kPressureTrimInterval) {
+      // Ceiling is already in force for admissions. Evicting again this soon
+      // would only free pinned backing the next capture asks for straight back.
+      return;
+    }
+    pressure_trimmed_at = now;
+    // Keep one record. A single checkpoint larger than the ceiling cannot be
+    // brought under it by eviction - that only trades reuse for a guaranteed
+    // re-prefill of the whole prefix next turn, at the same memory cost. Host
+    // protection still works through the ceiling gating new admissions below.
+    // The turn's own protected boundaries are honoured, so a trim cannot take
+    // an edit boundary the running prefill depends on.
+    auto trim = turn;
+    // Pressure evicts on behalf of the host, not for an incoming payload, so
+    // the "impossible payload refuses without evicting" rule does not apply.
+    trim.new_payload_bytes = 0;
+    std::size_t passes{};
+    while (passes < kPressureTrimPassLimit &&
+           cache::ShouldTrimRecord(retention.Size(),
+                                   retention.RetainedPayloadBytes(),
+                                   verdict.ram_ceiling_bytes) &&
+           retention.Reclaim(trim))
+      ++passes;
+    // Emissions from Reclaim carry kByteCapacity, the same reason an ordinary
+    // over-budget eviction reports. This line distinguishes a trim the host
+    // asked for from one the budget asked for, and reports both sides of the
+    // loop: a record pinned elsewhere is removed while freeing nothing, so
+    // held_after can equal held_before with passes at the limit.
+    //
+    // Nothing removable is not worth a warning on every retry. That is the
+    // steady state when the ceiling cannot hold even one record, which is a
+    // sizing fact about the workload, already visible in the ceiling log.
+    if (passes == 0)
+      return;
+    Logger::Warn("cache",
+                 "schema=component-cache-v1 event=host_pressure action=trim "
+                 "ceiling_bytes=" +
+                     std::to_string(verdict.ram_ceiling_bytes) +
+                     " held_before_bytes=" + std::to_string(held) +
+                     " held_after_bytes=" +
+                     std::to_string(retention.RetainedPayloadBytes()) +
+                     " records=" + std::to_string(retention.Size()) +
+                     " passes=" + std::to_string(passes));
+  }
+
   std::size_t Persist(std::shared_ptr<const cache::Checkpoint> checkpoint) {
     // Grid captures support RAM edits during prefill. Persist semantic prompt
     // and learned boundaries: an early grid must not consume the spacing
@@ -1787,6 +1925,9 @@ std::size_t ComponentTextCache::Lease::PublishSnapshot(
   bool admitted;
   {
     const std::lock_guard lock(impl_->cache->mutex);
+    // The only place new checkpoint payload is committed, so the one place a
+    // host reading can still prevent an over-commitment.
+    impl_->cache->ApplyHostPressure(retain);
     admitted = impl_->cache->retention.Admit(
         retain, [&] { return component->checkpoint; });
   }

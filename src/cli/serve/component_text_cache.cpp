@@ -585,13 +585,14 @@ struct ComponentTextCache::Impl {
   // Hold the retention ceiling to what the host can currently afford, and
   // reclaim a margin-sized overshoot. Called with mutex held.
   //
-  // The budget is a load-time reading of host availability, and on a unified
-  // memory host the model's device window draws from the same RAM. Measured on
-  // a 124 GiB box running one 262144-token session: the claim saw 16276 MiB
-  // available and granted 8138 MiB, while the host settled at 7883 MiB for the
-  // last fourteen minutes of its life. The cache was permitted to hold slightly
-  // more than the host had free, and nothing noticed, because eviction compares
-  // holdings against the budget and never against the host.
+  // The budget is a reading of host availability taken while the model was
+  // still committing, and on a unified memory host the device window draws from
+  // the same RAM. Measured on a 124 GiB box running one 262144-token session:
+  // the cache was granted 7680 MiB, and the host's tightest reading over the
+  // rest of that run was 7879 MiB. The cache was therefore allowed to grow to
+  // within 199 MiB of everything the host had left, and nothing would have
+  // noticed, because eviction compares holdings against the budget and never
+  // against the host.
   void ApplyHostPressure() {
     if (!ram_enabled || budget == 0)
       return;

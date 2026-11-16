@@ -31,6 +31,7 @@
 #include "src/models/laguna/chat_template.hpp"
 #include "src/models/laguna/continuation_adapter.hpp"
 #include "src/models/laguna/gpu/engine.hpp"
+#include "src/models/laguna/settle.hpp"
 #include "src/models/laguna/tool_calls.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 
@@ -164,10 +165,11 @@ public:
     return value;
   }
   static constexpr std::size_t kWarmupTokens = 4096;
-  // A device that has just released ~109 GiB of GTT needs a moment before
-  // its next allocation lands correctly. Two attempts with a pause
-  // between them covers a restart straight after the previous server
-  // exited.
+  // A device that has just released ~109 GiB of GTT needs a moment before its
+  // next allocation lands correctly, so a restart straight after the previous
+  // server exited is worth retrying. Sleeping only helps while that release is
+  // still in progress, which DeviceStillReleasing decides, so these are an
+  // upper bound on attempts rather than a wait everyone pays.
   static constexpr int kProbeAttempts = 3;
   static constexpr int kProbeRetryWaitSeconds = 45;
 
@@ -199,29 +201,13 @@ public:
   // It also catches a device that is still settling. When the previous
   // server exited, it left ~109 GiB of GTT mapped; a new server started
   // before the device recovered gets an allocation that does not match
-  // reality and every forward reads non-finite values. The device
-  // recovers on its own, so retry after a pause rather than failing:
-  // measured on the Nimo Axis N161, one start in four was broken without
-  // the pause and none of four were broken with it.
+  // reality and every forward reads non-finite values. Retrying is worth it
+  // only while that release is still in progress, which CreateSessionSettling
+  // decides from the free pool rather than from elapsed time.
   void MeasureSessionBytes() {
     std::string error;
-    std::unique_ptr<LagunaSession> probe;
-    for (int attempt = 1; attempt <= kProbeAttempts; ++attempt) {
-      probe = model_->CreateSession(
-          max_context_ + LagunaSession::kMaxVerifyRows, &error);
-      if (probe != nullptr) {
-        break;
-      }
-      if (!IsDeviceUnsettled(error) || attempt == kProbeAttempts) {
-        break;
-      }
-      Logger::Warn(
-          "loader",
-          "event=session_probe_retry attempt=" + std::to_string(attempt) +
-              " wait_s=" + std::to_string(kProbeRetryWaitSeconds) +
-              " reason=device_settling");
-      std::this_thread::sleep_for(std::chrono::seconds(kProbeRetryWaitSeconds));
-    }
+    auto probe = CreateSessionSettling(
+        max_context_ + LagunaSession::kMaxVerifyRows, &error, "session_probe");
     if (probe == nullptr) {
       Logger::Error("loader", "event=session_probe_failed reason=" + error);
       if (IsDeviceUnsettled(error)) {
@@ -241,6 +227,46 @@ public:
     return error.find("non-finite logits") != std::string::npos;
   }
 
+  // Create a session, pausing only while the device is still releasing memory.
+  //
+  // A warmup or a probe that reads unbacked memory says nothing about the next
+  // attempt until the pool it allocates from has changed, so the wait is
+  // measured against free device bytes rather than assumed to help. When the
+  // pool stops growing the loop stops at once: the bad state is this process's
+  // own allocation, and a fresh process recovering it is the supervisor's job,
+  // not something more sleeping can do. `event` names the caller's counter so
+  // the log keeps session_probe_retry and warmup_retry apart.
+  [[nodiscard]] std::unique_ptr<LagunaSession> CreateSessionSettling(
+      std::uint32_t length, std::string* error, const char* event) const {
+    for (int attempt = 1; attempt <= kProbeAttempts; ++attempt) {
+      auto session = model_->CreateSession(length, error);
+      if (session != nullptr)
+        return session;
+      if (!IsDeviceUnsettled(*error) || attempt == kProbeAttempts)
+        break;
+      const auto free_before = LagunaModel::FreeDeviceBytes();
+      Logger::Warn("loader",
+                   "event=" + std::string{event} +
+                       "_retry attempt=" + std::to_string(attempt) +
+                       " wait_s=" + std::to_string(kProbeRetryWaitSeconds) +
+                       " reason=device_settling");
+      std::this_thread::sleep_for(std::chrono::seconds(kProbeRetryWaitSeconds));
+      const auto free_after = LagunaModel::FreeDeviceBytes();
+      if (!DeviceStillReleasing(free_before, free_after)) {
+        // Report the pool rather than the wait: this is the evidence that the
+        // device was not the problem.
+        Logger::Warn("loader",
+                     "event=" + std::string{event} +
+                         "_abandoned attempt=" + std::to_string(attempt) +
+                         " reason=no_device_progress free_before_bytes=" +
+                         std::to_string(free_before) +
+                         " free_after_bytes=" + std::to_string(free_after));
+        break;
+      }
+    }
+    return nullptr;
+  }
+
   // True when the load-time probe never got a finite forward out of the
   // device.
   [[nodiscard]] bool DeviceUnsettled() const noexcept {
@@ -250,6 +276,11 @@ public:
   void Warmup() const {
     const char* disabled = std::getenv("GUFO_WARMUP");
     if (disabled != nullptr && disabled[0] == '0')
+      return;
+    // The probe never got a finite forward, so the load aborts with that error
+    // regardless. A warmup here would only add its own attempt and retry wait
+    // to report the same fault twice.
+    if (device_unsettled_)
       return;
     try {
       const std::size_t room = max_context_ > 128 ? max_context_ - 128 : 0;
@@ -262,23 +293,8 @@ public:
       // a device that has not settled shows itself. The probe above
       // already covers the same ground, but the warmup runs a wider
       // forward and can fail where the probe did not; retry the same way.
-      std::unique_ptr<LagunaSession> session;
-      for (int attempt = 1; attempt <= kProbeAttempts; ++attempt) {
-        session = model_->CreateSession(static_cast<std::uint32_t>(length + 16),
-                                        &error);
-        if (session != nullptr) {
-          break;
-        }
-        if (!IsDeviceUnsettled(error) || attempt == kProbeAttempts) {
-          break;
-        }
-        Logger::Warn("loader",
-                     "event=warmup_retry attempt=" + std::to_string(attempt) +
-                         " wait_s=" + std::to_string(kProbeRetryWaitSeconds) +
-                         " reason=device_settling");
-        std::this_thread::sleep_for(
-            std::chrono::seconds(kProbeRetryWaitSeconds));
-      }
+      auto session = CreateSessionSettling(
+          static_cast<std::uint32_t>(length + 16), &error, "warmup");
       if (session == nullptr) {
         Logger::Warn("loader", "event=warmup_skipped reason=" + error);
         return;

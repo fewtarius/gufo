@@ -15,6 +15,14 @@ if(TARGET gufo_laguna)
   target_link_libraries(laguna_tool_calls_test PRIVATE gufo_laguna)
   add_test(NAME laguna.tool_calls COMMAND laguna_tool_calls_test)
   set_tests_properties(laguna.tool_calls PROPERTIES LABELS "cpu;laguna;tokenization")
+
+  # The device-settle predicate decides whether a retry is worth the wait. It
+  # is pure, so a CPU test pins the behaviour that took a device investigation
+  # to establish: sleeping only helps while the pool is still growing.
+  add_executable(laguna_settle_test settle_test.cpp)
+  target_include_directories(laguna_settle_test PRIVATE ${PROJECT_SOURCE_DIR})
+  add_test(NAME laguna.settle COMMAND laguna_settle_test)
+  set_tests_properties(laguna.settle PROPERTIES LABELS "cpu;laguna")
 endif()
 
 if(ENGINE_ENABLE_HIP AND TARGET gufo_laguna_hip)

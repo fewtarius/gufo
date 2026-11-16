@@ -673,6 +673,13 @@ Session::~Session() {
     snapshots_->failure = std::current_exception();
   }
   TrimRollback(0);
+  // Device storage and graph memory are released here, and a launch queued by
+  // the last request may still reference both. Drain once; when the queue
+  // cannot be drained leave the storage to the driver's teardown instead of
+  // returning memory that live commands still walk.
+  if (owner_->stream() != nullptr &&
+      hipStreamSynchronize(owner_->stream()) != hipSuccess)
+    return;
   for (auto& [key, exec] : graphs_) {
     (void)hipGraphExecDestroy(exec);
   }
@@ -689,8 +696,13 @@ void Session::RestoreVisionLayout(const qwen::vision::RopeLayout& layout,
   for (auto& attention : attention_)
     attention.rope = vision_input_.rope();
   if (previous != vision_input_.rope()) {
-    for (const auto& [key, graph] : graphs_)
-      (void)hipGraphExecDestroy(graph);
+    // A graph recorded against the old rope may still be replaying. Drain
+    // before releasing its memory, and drop the map unusable rather than free
+    // an exec the command processor is still walking when the drain fails.
+    if (hipStreamSynchronize(stream) == hipSuccess) {
+      for (const auto& [key, graph] : graphs_)
+        (void)hipGraphExecDestroy(graph);
+    }
     graphs_.clear();
     warmed_.clear();
   }
@@ -712,8 +724,12 @@ void Session::ConfigureVision(
   for (auto& attention : attention_)
     attention.rope = vision_input_.rope();
   if (previous != vision_input_.rope()) {
-    for (const auto& [key, graph] : graphs_)
-      (void)hipGraphExecDestroy(graph);
+    // See RestoreVisionLayout: drain the recording stream before the execs
+    // that carry the old rope are released.
+    if (hipStreamSynchronize(stream) == hipSuccess) {
+      for (const auto& [key, graph] : graphs_)
+        (void)hipGraphExecDestroy(graph);
+    }
     graphs_.clear();
     warmed_.clear();
   }
@@ -880,6 +896,13 @@ std::unique_ptr<PrefillCheckpoint> Executor::MakePrefillCheckpoint(
 
 void Session::TrimRollback(std::uint32_t depth) noexcept {
   if (depth >= rollback_depth_)
+    return;
+  // The rows and verifier graphs released below may still be referenced by a
+  // launched pass: a verifier replay is queued without a synchronise and the
+  // next step's sample is what drains it. Drain once here, and if the queue
+  // cannot be drained keep every row and graph rather than handing storage a
+  // live command still reads back to the allocator.
+  if (hipStreamSynchronize(owner_->stream()) != hipSuccess)
     return;
   // Keep graphs whose rows still exist. Deeper verifier graphs capture
   // discarded pointers; ordinary decode and MTP graphs do not.
@@ -1908,8 +1931,14 @@ void Executor::AdoptYarnFactor(Session& s, float factor) {
     rope = MakeYarnRope(scaling, c.rotary_dim, c.rope_theta);
   }
   if (factor != s.yarn_factor_) {
-    for (auto& [key, exec] : s.graphs_)
-      (void)hipGraphExecDestroy(exec);
+    // A replay of these graphs carries the old constants and may already be
+    // queued. Free an exec only once the queue has drained; when it cannot be
+    // drained, drop the map and leak the execs rather than release graph
+    // memory the command processor is still walking.
+    if (hipStreamSynchronize(stream_) == hipSuccess) {
+      for (auto& [key, exec] : s.graphs_)
+        (void)hipGraphExecDestroy(exec);
+    }
     s.graphs_.clear();
   }
   s.yarn_factor_ = factor;

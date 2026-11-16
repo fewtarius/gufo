@@ -222,6 +222,9 @@ std::array<std::uint64_t, 4> RetentionPolicy::PressureOrder(
                c.descriptor.row_bytes;
     else
       rows += c.position.valid_rows * c.descriptor.row_bytes;
+  // Deliberately the configured limit and not RamBudget(): a host reading
+  // shortens how much a pressure ceiling allows to be held, and must not also
+  // rewrite the recency window that decides which checkpoint goes first.
   const auto turnover = ledger_.Limits().ram_bytes;
   const auto fresh = [&](const Record& x) {
     return x.reused_at && admitted_bytes_ - *x.reused_at < turnover;
@@ -560,8 +563,21 @@ void RetentionPolicy::Erase(std::size_t i, RetentionReason reason,
   Emit(RetentionAction::kRemoved, reason, id, boundary, purpose, rank, used,
        before > after ? before - after : 0);
 }
+void RetentionPolicy::SetHostRamCeiling(std::optional<std::size_t> ceiling) {
+  // Stored as given. RamBudget takes the minimum with the ledger's own limit,
+  // so a ceiling above it can never raise the budget.
+  host_ram_ceiling_ = ceiling;
+}
+
+std::size_t RetentionPolicy::RamBudget() const noexcept {
+  const auto configured = ledger_.Limits().ram_bytes;
+  if (!host_ram_ceiling_)
+    return configured;
+  return std::min(configured, *host_ram_ceiling_);
+}
+
 bool RetentionPolicy::Reclaim(const RetentionRequest& r) {
-  if (r.new_payload_bytes > ledger_.Limits().ram_bytes)
+  if (r.new_payload_bytes > RamBudget())
     return false;
   const auto victim = Victim(r, false);
   if (victim == limit_)
@@ -583,7 +599,7 @@ bool RetentionPolicy::Admit(const RetentionRequest& r, const Capture& capture) {
     return refuse(RetentionReason::kInvalid);
   const auto limits = ledger_.Limits();
   if (r.new_payload_bytes > limits.total_bytes ||
-      r.new_payload_bytes > limits.ram_bytes)
+      r.new_payload_bytes > RamBudget())
     return refuse(RetentionReason::kByteCapacity);
   // ReserveSnapshot's optional-role record guard precedes its exact-match
   // search. Republishing an exact boundary still needs an eligible victim.

@@ -150,6 +150,17 @@ public:
   // Reclaim one eligible record for a caller that captures outside its index
   // lock. The caller retries the same frozen frontier before publication.
   [[nodiscard]] bool Reclaim(const RetentionRequest&);
+  // Host RAM pressure ceiling, supplied by the owner from repeated host
+  // samples. It restricts the ledger's RAM limit for byte-pressure decisions
+  // and can only tighten it: a ceiling above the ledger limit is ignored.
+  // Nullopt clears it, which is what a host that cannot be read must do, so a
+  // failed sample never strands the cache at whatever the last read implied.
+  // The ledger's own limits stay untouched; ConstrainLimits is initialization
+  // only, and pressure is a running condition.
+  void SetHostRamCeiling(std::optional<std::size_t>);
+  // The RAM limit byte-pressure decisions use: the ledger's, tightened by the
+  // host ceiling when one is set.
+  [[nodiscard]] std::size_t RamBudget() const noexcept;
   void Touch(CheckpointId);
   void Remove(CheckpointId);
   [[nodiscard]] std::uint32_t Rank(CheckpointId) const;
@@ -189,6 +200,7 @@ private:
   ResourceLedger& ledger_;
   PrefixIndex& index_;
   RetentionEventSink* sink_;
+  std::optional<std::size_t> host_ram_ceiling_;
   ResourceCharge metadata_;
   std::array<Record, kRecordLimit> records_;
   std::size_t limit_, size_{};

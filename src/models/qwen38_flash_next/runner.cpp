@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -589,6 +590,38 @@ public:
     if (logits.empty()) {
       throw std::runtime_error(
           "Qwen3.8-Flash-Next token selection has no logits");
+    }
+    // A forward that produced non-finite logits fails later, in the sampler,
+    // as "logit distribution contains no finite values" - which reads as a
+    // model fault and hides a broken device or a bad allocation. Catch it
+    // here, where the position and the session state are known, and throw
+    // a descriptive error instead of letting the sampler throw a generic one.
+    {
+      std::size_t bad = 0;
+      float first = 0.0F;
+      for (const float value : logits) {
+        if (!std::isfinite(value)) {
+          if (bad == 0)
+            first = value;
+          ++bad;
+        }
+      }
+      if (bad != 0) {
+        std::string detail =
+            "Qwen3.8-Flash-Next: the forward produced non-finite logits";
+        detail += " at position " + std::to_string(qfn.position());
+        detail += " (" + std::to_string(bad) + " of " +
+                  std::to_string(logits.size()) + " values,";
+        detail += " first=" + std::to_string(static_cast<double>(first));
+        detail += "). The GPU reported no error from the forward, so the "
+                  "device is still healthy and the model read memory it "
+                  "should not have - usually a KV cache larger than the "
+                  "device can back, or a device that has not settled after "
+                  "the previous server released it. Restart the server and "
+                  "wait about a minute before starting it again; use a "
+                  "smaller context if it keeps happening.";
+        throw std::runtime_error(detail);
+      }
     }
     const auto token = static_cast<std::int32_t>(sampler.Sample(logits));
     const bool stop = EndsTurn(qfn, *model_, token);

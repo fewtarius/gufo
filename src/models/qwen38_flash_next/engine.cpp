@@ -1163,6 +1163,39 @@ bool Session::PrepareDecode(const DecodeRequest& request,
     result->stop = true;
     return true;
   }
+  // A forward that produced non-finite logits fails later, in the sampler,
+  // as "logit distribution contains no finite values" - which reads as a
+  // model fault and hides a broken device or a bad allocation. Catch it
+  // here, where the position and the session state are known, and return
+  // a descriptive error instead of letting the sampler throw.
+  {
+    std::size_t bad = 0;
+    float first = 0.0F;
+    for (const float value : logits_) {
+      if (!std::isfinite(value)) {
+        if (bad == 0)
+          first = value;
+        ++bad;
+      }
+    }
+    if (bad != 0) {
+      std::string detail =
+          "Qwen3.8-Flash-Next: the forward produced non-finite logits";
+      detail += " at position " + std::to_string(tokens_.size());
+      detail += " (" + std::to_string(bad) + " of " +
+                std::to_string(logits_.size()) + " values,";
+      detail += " first=" + std::to_string(static_cast<double>(first));
+      detail += "). The GPU reported no error from the forward, so the "
+                "device is still healthy and the model read memory it "
+                "should not have - usually a KV cache larger than the "
+                "device can back, or a device that has not settled after "
+                "the previous server released it. Restart the server and "
+                "wait about a minute before starting it again; use a "
+                "smaller context if it keeps happening.";
+      AssignError(error_msg, detail);
+      return false;
+    }
+  }
   const auto anchor = static_cast<std::int32_t>(sampler.Sample(logits_));
   auto anchor_logprobs =
       sampling::CollectLogprobs(logits_, anchor, sampler.config().logprobs);

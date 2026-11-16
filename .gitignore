@@ -111,6 +111,8 @@ __pycache__/
 # Agent helpers
 .codegraph
 context.md
+# Session handoff notes are internal context, never publishable
+ai-assisted/
 # graphify: knowledge graph, report and converted sidecars live here
 graphify-out/
 

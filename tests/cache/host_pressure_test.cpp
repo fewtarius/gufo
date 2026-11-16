@@ -88,6 +88,22 @@ void ZeroFloorAffordsAllAvailability() {
   assert(verdict.ram_ceiling_bytes == 2 * kGiB);
 }
 
+void TrimKeepsTheLastRecord() {
+  // The regression this guards: one checkpoint larger than the ceiling was
+  // evicted and re-captured every request, 48 GiB of pinned host backing in
+  // thirteen minutes. One record is the floor because it still serves reuse.
+  assert(!ShouldTrimRecord(1, 5 * kGiB, 3 * kGiB));
+  assert(!ShouldTrimRecord(0, 5 * kGiB, 3 * kGiB));
+  // With more than one, trimming can bring the cache under the ceiling.
+  assert(ShouldTrimRecord(2, 5 * kGiB, 3 * kGiB));
+  // Over-by-one-byte still trims; the margin belongs to HostPressure, which
+  // decides whether an overshoot is worth acting on at all.
+  assert(ShouldTrimRecord(2, 3 * kGiB + 1, 3 * kGiB));
+  // At or under the ceiling there is nothing to do however many records exist.
+  assert(!ShouldTrimRecord(4, 3 * kGiB, 3 * kGiB));
+  assert(!ShouldTrimRecord(4, 1 * kGiB, 3 * kGiB));
+}
+
 struct PressureFixture {
   ResourceLedger ledger{kIndexLimits};
   PrefixIndex index{ledger};
@@ -152,6 +168,7 @@ int main() {
   TrimNeedsAWholeMarginOfOvershoot();
   OvershootTestDoesNotWrap();
   ZeroFloorAffordsAllAvailability();
+  TrimKeepsTheLastRecord();
   RamBudgetTakesTheMinimum();
   CeilingGatesAdmission();
   CeilingGatesReclaim();

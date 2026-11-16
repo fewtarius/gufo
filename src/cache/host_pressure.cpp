@@ -25,4 +25,9 @@ HostPressureVerdict HostPressure(std::size_t configured_ram_bytes,
   return {ceiling, trim};
 }
 
+bool ShouldTrimRecord(std::size_t records, std::size_t held_bytes,
+                      std::size_t ceiling_bytes) noexcept {
+  return records > 1 && held_bytes > ceiling_bytes;
+}
+
 }  // namespace gufo::cache

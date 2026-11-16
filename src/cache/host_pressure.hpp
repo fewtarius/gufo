@@ -37,6 +37,19 @@ struct HostPressureVerdict {
     std::optional<std::uint64_t> available_bytes, std::uint64_t floor_bytes,
     std::size_t held_bytes) noexcept;
 
+// Whether a pressure trim should evict one more record.
+//
+// Two conditions, and the first is the one that matters. A cache holding a
+// single record still serves reuse of that prefix; evicting it trades that for
+// a guaranteed re-prefill of the whole prefix next turn at the same memory
+// cost, so trimming below one record buys nothing and can repeat every request.
+// That is not hypothetical: a workload whose single checkpoint is larger than
+// the ceiling evicted and re-captured 48 GiB of pinned host backing in thirteen
+// minutes while prefill was running. Host protection still applies through the
+// ceiling, which gates what new admissions may add.
+[[nodiscard]] bool ShouldTrimRecord(std::size_t records, std::size_t held_bytes,
+                                    std::size_t ceiling_bytes) noexcept;
+
 }  // namespace gufo::cache
 
 #endif  // GUFO_CACHE_HOST_PRESSURE_HPP_

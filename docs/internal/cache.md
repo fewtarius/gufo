@@ -407,7 +407,12 @@ with zero captures. Off drops every RAM checkpoint, so there is no restore from
 RAM, no shared-prefix or branch checkpoint, and no retained history. With
 `--cache-disk`, Qwen and Flash-Next still copy each disk capture through a
 bounded 512 MiB backing, so `backing_prepared` appears in that case only. The
-startup line reports `ram_cache=off capacity_bytes=0`.
+startup line reports `ram_cache=off capacity_bytes=0`. Disk-only serving also
+needs metadata for its retained disk index and in-flight publications. Its
+metadata remains accounted without an aggregate RAM admission limit; allocation
+can still fail if host memory is exhausted. This does not enable RAM checkpoints
+or enlarge the fixed capture backing and disk staging buffer. Persistence pins
+remain capped at the 512 MiB disk-capture backing capacity.
 
 An explicit `--cache-ram-bytes` the host cannot hold is trimmed to what remains
 after the sessions allocate, and the server logs `event=ram_cache_trimmed` with

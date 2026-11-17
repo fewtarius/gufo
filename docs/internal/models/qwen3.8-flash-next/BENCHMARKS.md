@@ -20,6 +20,11 @@ is the between-run settling behaviour the methodology describes, showing up as
 a GPU queue error rather than non-finite logits. Space consecutive large loads
 before concluding anything about this model's context ceiling.
 
+## Single user, autoregressive
+
+Approximately pp2048 / tg128; depth is the cached prefix in tokens.
+Context capacities differ between engines; see the measurement details.
+
 <!-- bench:single-ar -->
 | Qwen3.8-Flash-Next AR<br>Depth (tokens) | pp (tok/s) | tg (tok/s) |
 | ---: | ---: | ---: |
